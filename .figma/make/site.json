@@ -1,0 +1,10 @@
+{
+  "description": "Streamline your development workflow with a modern dashboard that consolidates tasks, sprint planning, and progress tracking for efficient team collaboration.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -1,0 +1,759 @@
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blue Digital — Story Manager</title>
+    <link rel="stylesheet" href="/css/app.css" />
+  </head>
+  <body>
+
+  <div id="topbar">
+    <div class="brand">Blue Digital <span>Story Manager</span></div>
+    <nav>
+      <button class="nav-btn active" data-view="backlog">📋 Backlog</button>
+      <button class="nav-btn" data-view="planning">📅 Planning Board</button>
+      <button class="nav-btn" data-view="sprints">🏃 Sprints</button>
+      <button class="nav-btn" data-view="releases">🚀 Releases</button>
+      <button class="nav-btn" data-view="settings">⚙️ Settings</button>
+    </nav>
+    <div class="topbar-actions">
+      <button id="btn-import-top" title="Import work items from an ADO CSV export (sprint or release format — detected automatically)">⬆ Import CSV</button>
+      <button id="btn-export-top" title="Export a specific sprint or release to ADO-compatible CSV">⬇ Export CSV</button>
+      <button id="btn-ado-import" title="Open Azure DevOps' CSV import page in a new tab" onclick="window.open('https://dev.azure.com/BlueFCU/Blue%20Digital/_queries/query/?importData=csv', '_blank', 'noopener')">ADO Import</button>
+    </div>
+  </div>
+
+  <div id="main">
+
+    <!-- ═══════════════════ BACKLOG VIEW ═══════════════════ -->
+    <div id="view-backlog" class="view active">
+      <div class="view-header">
+        <h2>Work Item Backlog</h2>
+        <div class="filters">
+          <input type="text" id="wi-search" placeholder="Search titles..." style="width:180px" />
+          <select id="wi-filter-type">
+            <option value="">All Types</option>
+            <option value="User Story">User Story</option>
+            <option value="Bug">Bug</option>
+            <option value="Release">Release</option>
+          </select>
+          <select id="wi-filter-platform">
+            <option value="">Any Platform</option>
+            <option value="All Platforms">All Platforms</option>
+            <option value="All Mobile">All Mobile</option>
+            <option value="All Web">All Web</option>
+            <option value="Back End">Back End</option>
+            <option value="Mobile - Android">Mobile - Android</option>
+            <option value="Mobile - IOS">Mobile - IOS</option>
+            <option value="Web - Chrome">Web - Chrome</option>
+            <option value="Web - Edge">Web - Edge</option>
+            <option value="Web - Responsive">Web - Responsive</option>
+            <option value="Web - Safari">Web - Safari</option>
+          </select>
+          <select id="wi-filter-state">
+            <option value="">All States</option>
+            <option value="New">New</option>
+            <option value="Active">Active</option>
+            <option value="Blocked">Blocked</option>
+            <option value="Closed">Closed</option>
+          </select>
+          <!-- One option per sprint shown on the Planning Board is appended at runtime
+               by populateBacklogFilter() in workitems.js — see the comment there. -->
+          <select id="wi-filter-backlog">
+            <option value="">Backlog + Sprint</option>
+            <option value="backlog">Backlog Only</option>
+            <option value="sprint">In Sprint</option>
+          </select>
+          <select id="wi-filter-source">
+            <option value="">All Sources</option>
+            <option value="notion">📎 From Notion</option>
+            <option value="manual">Manual Entry</option>
+          </select>
+          <select id="wi-filter-epic" title="Show only stories with this Parent"></select>
+        </div>
+        <button class="btn btn-secondary" id="btn-new-feature">+ New Feature</button>
+        <button class="btn btn-primary" id="btn-new-wi">+ New Work Item</button>
+      </div>
+      <div class="view-body">
+        <div class="settings-section" id="notion-pending-section" style="display:none;margin-bottom:16px">
+          <h3 style="display:flex;align-items:center;justify-content:space-between">
+            <span>📎 Ready to Import from Notion (<span id="notion-pending-count">0</span>)</span>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="notion-pending-select-all" /> Select all
+            </label>
+          </h3>
+          <div id="notion-pending-list" class="notion-pages"></div>
+          <div id="notion-pending-bulk-actions" style="display:none;margin-top:12px;gap:10px;align-items:center">
+            <span id="notion-pending-bulk-count" style="font-size:13px;color:var(--gray-600)"></span>
+            <button class="btn btn-primary btn-sm" id="btn-notion-import-selected">Import Selected</button>
+          </div>
+        </div>
+        <div class="settings-section features-section" id="features-section" style="display:none;margin-bottom:16px">
+          <h3 id="features-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" title="Click to show/hide the feature list">
+            <span><span id="features-chevron" style="display:inline-block;width:12px">▾</span> 🧩 Features (<span id="features-count">0</span>)</span>
+            <span style="font-weight:400;font-size:12px;color:var(--gray-600)">🔒 keeps the feature's stories at fixed sprint spacing on the Planning Board</span>
+          </h3>
+          <div id="features-list" class="feature-cards"></div>
+        </div>
+        <div class="stats-bar" id="wi-stats" style="margin-bottom:16px"></div>
+        <div style="margin-bottom:12px;display:none;gap:10px;align-items:center;flex-wrap:wrap" id="bulk-actions">
+          <span id="bulk-count" style="font-size:13px;color:var(--gray-600)"></span>
+          <select id="bulk-sprint-select" style="padding:5px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px"></select>
+          <button class="btn btn-secondary btn-sm" id="btn-bulk-assign">Assign to Sprint</button>
+          <select id="bulk-epic-select" style="padding:5px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px"></select>
+          <button class="btn btn-secondary btn-sm" id="btn-bulk-assign-feature">Assign to Parent</button>
+          <button class="btn btn-secondary btn-sm" id="btn-bulk-export">Export Selected</button>
+          <button class="btn btn-primary btn-sm" id="btn-bulk-push-ado" title="Create or update the selected items in Azure DevOps via the ADO Bridge">🚀 Push to ADO</button>
+          <button class="btn btn-danger btn-sm" id="btn-bulk-delete">Delete Selected</button>
+        </div>
+        <div class="wi-table-wrap">
+          <table id="wi-table">
+            <thead>
+              <tr>
+                <th style="width:32px"><input type="checkbox" id="wi-select-all" title="Select all" /></th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Platform</th>
+                <th>State</th>
+                <th>Priority</th>
+                <th>Points</th>
+                <th>Sprint</th>
+                <th>DoD</th>
+                <th style="width:110px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="wi-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ PLANNING BOARD ═══════════════════ -->
+    <div id="view-planning" class="view">
+      <div class="view-header">
+        <h2>Planning Board</h2>
+        <div class="filters">
+          <label style="font-size:12px;color:var(--gray-600)">Show sprints:</label>
+          <select id="plan-sprint-range">
+            <option value="6">Next 6 sprints</option>
+            <option value="8" selected>Next 8 sprints</option>
+            <option value="12">Next 12 sprints</option>
+            <option value="all">All sprints</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-gen-sprints">+ Generate Sprints</button>
+        <button class="btn btn-secondary btn-sm" id="btn-new-milestone">+ New Milestone</button>
+        <button class="btn btn-secondary btn-sm" id="btn-publish-plan-board" title="Republish this plan to its Notion page">📤 Publish to Notion</button>
+        <button class="btn btn-primary btn-sm" id="btn-new-release-plan">+ New Release</button>
+      </div>
+      <div id="planning-board">
+        <div class="board-tracks" id="board-tracks"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ SPRINTS VIEW ═══════════════════ -->
+    <div id="view-sprints" class="view">
+      <div class="view-header">
+        <h2>Sprints</h2>
+        <button class="btn btn-secondary" id="btn-gen-sprints-2">+ Generate Sprints</button>
+        <button class="btn btn-primary" id="btn-new-sprint">+ New Sprint</button>
+      </div>
+      <div class="view-body">
+        <div id="sprints-list"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ RELEASES VIEW ═══════════════════ -->
+    <div id="view-releases" class="view">
+      <div class="view-header">
+        <h2>Releases</h2>
+        <button class="btn btn-primary" id="btn-new-release">+ New Release</button>
+      </div>
+      <div class="view-body">
+        <div id="releases-list"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ SETTINGS VIEW ═══════════════════ -->
+    <div id="view-settings" class="view">
+      <div class="view-header"><h2>Settings</h2></div>
+      <div class="view-body">
+        <div class="settings-section">
+          <h3>Sprint Cadence</h3>
+          <div class="form-grid" style="max-width:500px">
+            <div class="form-group">
+              <label>Sprint Start Date (first sprint)</label>
+              <input type="date" id="setting-sprint-start" />
+            </div>
+            <div class="form-group">
+              <label>Default Sprint Velocity (points)</label>
+              <input type="number" id="setting-velocity" value="20" min="1" />
+            </div>
+            <div class="form-group full">
+              <label>Generate Sprints Through</label>
+              <div style="display:flex;gap:10px">
+                <input type="date" id="setting-sprint-end" style="flex:1" />
+                <button class="btn btn-primary" id="btn-settings-gen-sprints">Generate</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Definition of Done — Default Checklist</h3>
+          <div id="dod-template-list" style="margin-bottom:12px"></div>
+          <div style="display:flex;gap:10px">
+            <input type="text" id="new-dod-label" placeholder="New checklist item..." style="flex:1;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px" />
+            <button class="btn btn-primary btn-sm" id="btn-add-dod">Add Item</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Features / Epics</h3>
+          <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center">
+            <span style="font-size:13px;color:var(--gray-600)">Import Features/Epics from CSV (ADO format) or add manually.</span>
+            <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+              📂 Import CSV <input type="file" id="epics-csv-file" accept=".csv" style="display:none" />
+            </label>
+            <button class="btn btn-primary btn-sm" id="btn-new-epic">+ Add Feature</button>
+          </div>
+          <div class="wi-table-wrap">
+            <table>
+              <thead><tr><th>ADO ID</th><th>Title</th><th>Type</th><th>Stories</th><th>Sprint Lock</th><th>Actions</th></tr></thead>
+              <tbody id="epics-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Notion Integration</h3>
+          <div class="tabs">
+            <button class="tab-btn active" data-tab="notion-connect">Connection</button>
+            <button class="tab-btn" data-tab="notion-search">Browse Pages</button>
+          </div>
+          <div class="tab-panel active" id="tab-notion-connect">
+            <div class="notion-connect">
+              <div class="notion-status" id="notion-status-bar">
+                <div class="dot dot-gray" id="notion-dot"></div>
+                <span id="notion-status-text">Not connected. Enter your Notion integration token below.</span>
+              </div>
+              <div class="form-group">
+                <label>Notion Integration Token</label>
+                <div style="display:flex;gap:10px">
+                  <input type="password" id="notion-token-input" placeholder="secret_xxxxxxxxxxxx" style="flex:1" />
+                  <button class="btn btn-primary" id="btn-save-token">Save & Connect</button>
+                </div>
+                <span class="hint">Create an integration at <strong>notion.so/my-integrations</strong> and share relevant pages with it. The token starts with <code>secret_</code>.</span>
+              </div>
+              <div class="form-group full" style="margin-top:12px;padding-top:16px;border-top:1px solid var(--gray-200)">
+                <label>Deadlines &amp; Milestones source</label>
+                <div id="milestones-source-status" style="font-size:13px;color:var(--gray-600);margin-bottom:10px">Checking…</div>
+                <div style="display:flex;gap:10px;margin-bottom:10px">
+                  <input type="text" id="milestones-source-override" placeholder="Paste a Notion database/data source URL or id to override" style="flex:1;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px" />
+                  <button class="btn btn-secondary btn-sm" id="btn-save-milestones-source">Use This</button>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center">
+                  <button class="btn btn-secondary btn-sm" id="btn-redetect-milestones-source">Re-detect</button>
+                  <button class="btn btn-primary btn-sm" id="btn-sync-milestones-now">Sync Now</button>
+                  <span class="hint" id="milestones-sync-result" style="margin:0"></span>
+                </div>
+              </div>
+              <div class="form-group full" style="margin-top:12px;padding-top:16px;border-top:1px solid var(--gray-200)">
+                <label>Sprint Plan page</label>
+                <div id="plan-page-status" style="font-size:13px;color:var(--gray-600);margin-bottom:10px">Checking…</div>
+                <div style="display:flex;gap:10px;margin-bottom:10px">
+                  <input type="text" id="plan-page-input" placeholder="Paste the Notion page URL to publish the plan to" style="flex:1;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px" />
+                  <button class="btn btn-secondary btn-sm" id="btn-save-plan-page">Use This</button>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center">
+                  <button class="btn btn-secondary btn-sm" id="btn-preview-plan">Preview</button>
+                  <button class="btn btn-primary btn-sm" id="btn-publish-plan">Publish Now</button>
+                  <span class="hint" id="plan-publish-result" style="margin:0"></span>
+                </div>
+                <span class="hint" style="margin-top:8px">Publishing <strong>replaces everything</strong> on that page, so point it at a page nothing else writes to. Share the page with the Story Manager integration first, then share it with your team.</span>
+              </div>
+            </div>
+          </div>
+          <div class="tab-panel" id="tab-notion-search">
+            <div style="display:flex;gap:10px;margin-bottom:16px">
+              <input type="text" id="notion-search-input" placeholder="Search Notion pages..." style="flex:1;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px" />
+              <button class="btn btn-primary" id="btn-notion-search">Search</button>
+            </div>
+            <div id="notion-pages-list" class="notion-pages"></div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Data</h3>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <label class="btn btn-secondary" style="cursor:pointer">
+              ⬆ Import Work Items CSV <input type="file" id="import-csv-file" accept=".csv" style="display:none" />
+            </label>
+            <button class="btn btn-secondary" id="btn-export-all-sprint">⬇ Export All (Sprint Format)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+
+  <!-- ═══════════════════ WORK ITEM MODAL ═══════════════════ -->
+  <div class="modal-overlay" id="wi-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="wi-modal-title">New Work Item</h3>
+        <button class="close-btn" data-close="wi-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="wi-tab-details">Details</button>
+          <button class="tab-btn" data-tab="wi-tab-desc">Description</button>
+          <button class="tab-btn" data-tab="wi-tab-dod">Definition of Done</button>
+        </div>
+        <div class="tab-panel active" id="wi-tab-details">
+          <div class="form-grid">
+            <div class="form-group full">
+              <label>Title *</label>
+              <input type="text" id="wi-title" placeholder="[Platform] > [Feature Area] > [Specific Task]" />
+              <span class="hint">Follow convention: Web > Feature > Task Name</span>
+            </div>
+            <div class="form-group">
+              <label>Work Item Type</label>
+              <select id="wi-type">
+                <option value="User Story">User Story</option>
+                <option value="Bug">Bug</option>
+                <option value="Release">Release</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Platform</label>
+              <select id="wi-platform">
+                <option value="">-- Select --</option>
+                <option value="All Platforms">All Platforms</option>
+                <option value="All Mobile">All Mobile</option>
+                <option value="All Web">All Web</option>
+                <option value="Back End">Back End</option>
+                <option value="Mobile - Android">Mobile - Android</option>
+                <option value="Mobile - IOS">Mobile - IOS</option>
+                <option value="Web - Chrome">Web - Chrome</option>
+                <option value="Web - Edge">Web - Edge</option>
+                <option value="Web - Responsive">Web - Responsive</option>
+                <option value="Web - Safari">Web - Safari</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>State</label>
+              <select id="wi-state">
+                <option value="New">New</option>
+                <option value="Active">Active</option>
+                <option value="Blocked">Blocked</option>
+                <option value="Closed">Closed</option>
+                <option value="Resolved">Resolved</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Priority</label>
+              <select id="wi-priority">
+                <option value="1">1 — Critical</option>
+                <option value="2" selected>2 — High</option>
+                <option value="3">3 — Medium</option>
+                <option value="4">4 — Low</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Story Points</label>
+              <input type="number" id="wi-points" min="0" max="100" placeholder="e.g. 2" />
+            </div>
+            <div class="form-group">
+              <label>Assigned To</label>
+              <input type="text" id="wi-assigned" placeholder="Name <email@bluefcu.com>" />
+            </div>
+            <div class="form-group">
+              <label>Tags</label>
+              <input type="text" id="wi-tags" placeholder="e.g. 2025.09" />
+            </div>
+            <div class="form-group">
+              <label>Sprint Focus Area</label>
+              <input type="text" id="wi-focus" placeholder="e.g. Holiday Loans" />
+            </div>
+            <div class="form-group">
+              <label>Parent</label>
+              <select id="wi-epic"></select>
+            </div>
+            <div class="form-group">
+              <label>Sprint Assignment</label>
+              <select id="wi-sprint"></select>
+            </div>
+            <div class="form-group">
+              <label>Release Assignment</label>
+              <select id="wi-release"></select>
+            </div>
+            <div class="form-group">
+              <label>ADO ID (existing items)</label>
+              <input type="text" id="wi-ado-id" placeholder="Leave blank for new items" />
+            </div>
+          </div>
+        </div>
+        <div class="tab-panel" id="wi-tab-desc">
+          <div class="form-group full" style="margin-bottom:12px">
+            <label>Description (HTML)</label>
+            <textarea id="wi-description" style="min-height:200px" placeholder="<div>As an engineer, I want to...</div>"></textarea>
+            <span class="hint">Enter HTML. Use &lt;div&gt;, &lt;ul&gt;, &lt;li&gt; tags as shown in ADO. The title convention handles discovery; this field holds the full specification.</span>
+            <div class="html-preview-label">Preview</div>
+            <div id="wi-description-preview" class="html-preview"></div>
+          </div>
+          <div class="form-group full" style="margin-bottom:12px">
+            <label>Acceptance Criteria</label>
+            <textarea id="wi-acceptance-criteria" style="min-height:120px" placeholder="- Given...&#10;- When...&#10;- Then..."></textarea>
+            <span class="hint">Plain text — not HTML. Folded into the Description on ADO CSV export, since ADO's own import format has no separate column for it.</span>
+            <div class="html-preview-label">Preview (as it will render once exported)</div>
+            <div id="wi-ac-preview" class="html-preview"></div>
+          </div>
+          <div class="form-group full">
+            <label>Features (Release only)</label>
+            <input type="text" id="wi-features" placeholder="Feature area names" />
+          </div>
+          <div class="form-group full">
+            <label>Public Release Notes (Release only)</label>
+            <textarea id="wi-public-notes" style="min-height:80px" placeholder="Member-facing release notes..."></textarea>
+          </div>
+          <div class="form-group full">
+            <label>Technical Release Notes (Release only)</label>
+            <textarea id="wi-tech-notes" style="min-height:80px" placeholder="Internal technical notes..."></textarea>
+          </div>
+        </div>
+        <div class="tab-panel" id="wi-tab-dod">
+          <div class="dod-panel" id="wi-dod-panel">
+            <h4>Definition of Done <span class="dod-progress" id="wi-dod-progress"></span></h4>
+            <div id="wi-dod-items"></div>
+          </div>
+          <div style="margin-top:12px;padding:10px;background:var(--blue-light);border-radius:6px;font-size:12px;color:var(--blue-dark)">
+            ℹ️ All DoD items must be checked before this work item can be exported to ADO.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span id="wi-notion-link" style="font-size:12px;color:var(--gray-400);flex:1"></span>
+        <button class="btn btn-danger btn-sm" id="btn-delete-wi" style="display:none">Delete</button>
+        <button class="btn btn-secondary" data-close="wi-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-wi">Save Work Item</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ SPRINT MODAL ═══════════════════ -->
+  <div class="modal-overlay" id="sprint-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3 id="sprint-modal-title">New Sprint</h3>
+        <button class="close-btn" data-close="sprint-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Sprint Name</label>
+            <input type="text" id="sprint-name" placeholder="Sprint 14 2026" />
+          </div>
+          <div class="form-group full">
+            <label>Iteration Path (ADO)</label>
+            <input type="text" id="sprint-iter" placeholder="Blue Digital\Sprint 14 2026" />
+          </div>
+          <div class="form-group">
+            <label>Start Date</label>
+            <input type="date" id="sprint-start" />
+          </div>
+          <div class="form-group">
+            <label>End Date</label>
+            <input type="date" id="sprint-end" />
+          </div>
+          <div class="form-group">
+            <label>Velocity (points)</label>
+            <input type="number" id="sprint-velocity" value="20" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="sprint-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-sprint">Save Sprint</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ MILESTONE MODAL ═══════════════════ -->
+  <div class="modal-overlay" id="milestone-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3 id="milestone-modal-title">New Milestone</h3>
+        <button class="close-btn" data-close="milestone-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Label</label>
+            <input type="text" id="milestone-title" placeholder="e.g. Code Freeze, Design Review" />
+          </div>
+          <div class="form-group">
+            <label>Start Date</label>
+            <input type="date" id="milestone-start-date" />
+          </div>
+          <div class="form-group">
+            <label>End Date</label>
+            <input type="date" id="milestone-end-date" />
+            <span class="hint">Same as Start Date for a single-day deadline.</span>
+          </div>
+          <div class="form-group full">
+            <span class="hint" id="milestone-sprint-hint"></span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <a id="milestone-notion-link" href="#" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue-dark);flex:1;display:none">Open in Notion ↗</a>
+        <button class="btn btn-danger btn-sm" id="btn-delete-milestone" style="display:none">Delete</button>
+        <button class="btn btn-secondary" data-close="milestone-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-milestone">Save Milestone</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ GENERATE SPRINTS MODAL ═══════════════════ -->
+  <div class="modal-overlay" id="gen-sprints-modal">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <h3>Generate Sprints</h3>
+        <button class="close-btn" data-close="gen-sprints-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>From Date</label>
+            <input type="date" id="gen-start" />
+          </div>
+          <div class="form-group">
+            <label>Through Date</label>
+            <input type="date" id="gen-end" />
+          </div>
+          <div class="form-group">
+            <label>Default Velocity</label>
+            <input type="number" id="gen-velocity" value="20" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="gen-sprints-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-confirm-gen-sprints">Generate</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ RELEASE MODAL ═══════════════════ -->
+  <div class="modal-overlay" id="release-modal">
+    <div class="modal" style="max-width:540px">
+      <div class="modal-header">
+        <h3 id="release-modal-title">New Release</h3>
+        <button class="close-btn" data-close="release-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Release Title</label>
+            <input type="text" id="rel-title" placeholder="iOS 2026.3.1" />
+          </div>
+          <div class="form-group">
+            <label>Platform</label>
+            <select id="rel-platform">
+              <option value="">-- Select --</option>
+              <option value="All Platforms">All Platforms</option>
+              <option value="All Mobile">All Mobile</option>
+              <option value="All Web">All Web</option>
+              <option value="Back End">Back End</option>
+              <option value="Mobile - Android">Mobile - Android</option>
+              <option value="Mobile - IOS">Mobile - IOS</option>
+              <option value="Web - Chrome">Web - Chrome</option>
+              <option value="Web - Edge">Web - Edge</option>
+              <option value="Web - Responsive">Web - Responsive</option>
+              <option value="Web - Safari">Web - Safari</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Target Date</label>
+            <input type="date" id="rel-date" />
+          </div>
+          <div class="form-group">
+            <label>Target Sprint</label>
+            <select id="rel-sprint"></select>
+          </div>
+          <div class="form-group">
+            <label>State</label>
+            <select id="rel-state">
+              <option value="Planned">Planned</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Released">Released</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Features</label>
+            <input type="text" id="rel-features" placeholder="DAO Enhancements, Bug Fixes" />
+          </div>
+          <div class="form-group full">
+            <label>ADO ID (existing release)</label>
+            <input type="text" id="rel-ado-id" placeholder="Leave blank for new" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm" id="btn-delete-release" style="display:none">Delete</button>
+        <button class="btn btn-secondary" data-close="release-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-release">Save Release</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ NOTION PAGE MODAL ═══════════════════ -->
+  <div class="modal-overlay" id="notion-page-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="notion-page-modal-title">Import Notion Page</h3>
+        <button class="close-btn" data-close="notion-page-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="notion-page-preview" style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:14px;max-height:300px;overflow-y:auto;font-size:13px;white-space:pre-wrap;line-height:1.6;margin-bottom:16px"></div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Work Item Type</label>
+            <select id="notion-import-type">
+              <option value="User Story">User Story</option>
+              <option value="Bug">Bug</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Platform</label>
+            <select id="notion-import-platform">
+              <option value="">-- Select --</option>
+              <option value="All Platforms">All Platforms</option>
+              <option value="All Mobile">All Mobile</option>
+              <option value="All Web">All Web</option>
+              <option value="Back End">Back End</option>
+              <option value="Mobile - Android">Mobile - Android</option>
+              <option value="Mobile - IOS">Mobile - IOS</option>
+              <option value="Web - Chrome">Web - Chrome</option>
+              <option value="Web - Edge">Web - Edge</option>
+              <option value="Web - Responsive">Web - Responsive</option>
+              <option value="Web - Safari">Web - Safari</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Parent</label>
+            <select id="notion-import-epic"></select>
+            <span class="hint" id="notion-import-epic-hint"></span>
+          </div>
+          <div class="form-group">
+            <label>Import mode</label>
+            <select id="notion-import-mode">
+              <option value="single">This page only</option>
+              <option value="full">This page + all sub-pages</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="notion-page-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-confirm-notion-import">Import as Work Item</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ EPIC MODAL ═══════════════════ -->
+  <div class="modal-overlay" id="epic-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <h3 id="epic-modal-title">Add Feature</h3>
+        <button class="close-btn" data-close="epic-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Title *</label>
+            <input type="text" id="epic-title" placeholder="Feature/Epic name" />
+          </div>
+          <div class="form-group">
+            <label>ADO ID</label>
+            <input type="text" id="epic-ado-id" placeholder="e.g. 11415" />
+          </div>
+          <div class="form-group">
+            <label>Type</label>
+            <select id="epic-type">
+              <option value="Feature">Feature</option>
+              <option value="Epic">Epic</option>
+            </select>
+          </div>
+          <div class="form-group full">
+            <label>Description</label>
+            <textarea id="epic-desc" style="min-height:80px"></textarea>
+          </div>
+          <div class="form-group full">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="epic-lock" style="width:auto" />
+              🔒 Lock sprint positions
+            </label>
+            <span class="hint">While locked, moving any story in this feature moves every other
+              scheduled story in it by the same number of sprints, holding their relative order.
+              Turn it off to rearrange, then back on to lock the new spacing in.</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm" id="btn-delete-epic" style="display:none">Delete</button>
+        <button class="btn btn-secondary" data-close="epic-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-epic">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXPORT MODAL -->
+  <div class="modal-overlay" id="export-modal">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <h3>Export to ADO CSV</h3>
+        <button class="close-btn" data-close="export-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:13px;color:var(--gray-600)">Choose export format:</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px;border:1px solid var(--gray-200);border-radius:6px">
+              <input type="radio" name="export-type" value="sprint" checked style="margin-top:2px" />
+              <div><strong>Sprint Import Format</strong><br><span style="font-size:12px;color:var(--gray-600)">For importing User Stories into a sprint. Uses the sprint_kickoff column format.</span></div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px;border:1px solid var(--gray-200);border-radius:6px">
+              <input type="radio" name="export-type" value="release" style="margin-top:2px" />
+              <div><strong>Release Format</strong><br><span style="font-size:12px;color:var(--gray-600)">Includes Iteration Path, Release Notes fields. For release documentation.</span></div>
+            </label>
+          </div>
+          <div class="form-group" id="export-sprint-select-wrap">
+            <label>Sprint</label>
+            <select id="export-sprint-select" style="width:100%;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px"></select>
+          </div>
+          <div class="form-group" id="export-release-select-wrap" style="display:none">
+            <label>Release</label>
+            <select id="export-release-select" style="width:100%;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px"></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="export-modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-confirm-export">Download CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/workitems.js"></script>
+  <script src="/js/planning.js"></script>
+  <script src="/js/notion.js"></script>
+  <script src="/js/settings.js"></script>
+  <script src="/js/app.js"></script>
+  </body>
+  </html>
