@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document instructs an LLM (or developer) on how to connect an existing application to the **notion-bridge** service. notion-bridge is a caching, authorizing proxy over Notion. It exposes a REST API that lets a developer dashboard pull task queues, resolve related context, and claim items — all without the application talking to Notion directly.
+This document instructs an LLM (or developer) on how to connect an existing application to the **notion-bridge** service. notion-bridge is a caching, authorizing proxy over Notion. It exposes a REST API that lets a developer dashboard pull task queues, resolve related context, claim/release/complete items, and read the current sprint and daily standup brief — all without the application talking to Notion directly.
 
 Read this document top to bottom before writing any code. The sections are ordered: understand the model → know the endpoints → implement the integration → handle edge cases.
 
@@ -16,7 +16,7 @@ Before connecting, understand what notion-bridge is and is not.
 - A stateless HTTP service sitting between your application and Notion.
 - The single component that talks to Notion. Your application does **not** call the Notion API directly.
 - A read-through cache with short TTLs, so repeated reads are fast.
-- The sole owner of Notion **writes** (claiming an item updates Notion properties so Notion stays the source of truth).
+- The sole owner of Notion **writes** (claiming, releasing, and completing an item update Notion properties so Notion stays the source of truth).
 
 **notion-bridge is not:**
 - An authentication system. Your application authenticates its own users. The bridge trusts the identifier your application passes.
@@ -27,6 +27,11 @@ Before connecting, understand what notion-bridge is and is not.
 1. Your application loads **queues** — lists of claimable items assigned to (or unassigned for) a developer.
 2. The developer selects an item and **claims** it. The bridge writes the claim back to Notion and returns the item's **related context bundle** (parent initiative/issue/project with its properties and content).
 3. Your application renders the item + related context on the dashboard.
+4. The developer either **releases** the item (back to the queue for others) or **marks it done**.
+
+Alongside the queues, the bridge serves the **current sprint** (`GET /sprint/current`) and each developer's **daily standup brief** (`GET /standup/today`), both read from Notion pages.
+
+A working reference client lives in this repo: `src/bridge.ts` (API calls and queue mappings) and `src/App.tsx` (claim/release on drag, mark done, brief, calendar). See `docs/IMPLEMENTATION.md` for how the dashboard uses each endpoint.
 
 ---
 
@@ -44,7 +49,7 @@ Before integrating, confirm the following:
 
 3. **Your application already authenticates users.** The bridge does not authenticate. It expects your application to pass a **developer identifier** with each request. This is typically a stable user id, email, or username that the bridge can resolve to a Notion person (see §4).
 
-4. **You know which queue slugs are configured.** The bridge's manifest defines queues by slug (e.g., `work-items`, `issues`, `epics`). Ask the bridge operator for the list, or inspect the `/health` response's `queues` keys. Your application references queues by slug.
+4. **You know which queue slugs are configured.** The bridge's manifest (`config/manifest.json`) defines queues by slug (currently `sprint-developer-items`, `pulse-queue`, `solarwinds`, `team-initiatives`, `issues`, `analyst-issues`, `deadlines-milestones`). Ask the bridge operator for the list, or inspect the `/health` response's `queues` keys. Your application references queues by slug.
 
 ---
 
@@ -52,14 +57,16 @@ Before integrating, confirm the following:
 
 ### How the bridge identifies the developer
 
-Every queue and claim request must identify the developer. Pass the developer identifier in one of two ways:
+Every queue, standup, and write request must identify the developer. Pass the developer identifier in one of three ways:
 
 - **Query parameter:** `?developer=<identifier>`
 - **HTTP header:** `X-Developer: <identifier>`
+- **JSON body field** (write routes): `{ "developer": "<identifier>" }`
 
 The bridge uses this identifier to:
-- Filter queues to items assigned to (or unassigned for) that developer.
-- Write the developer's Notion user id into the assignee property on claim.
+- Filter queues to items assigned to (or unassigned for) that developer — or, for queues with an `assigneeTextProperty`, items whose text assignee equals the developer's Notion name.
+- Write the developer's Notion user id into the assignee property on claim, and check it on release/done.
+- Pick the developer's Morning Brief (matched by the first word of their Notion name).
 
 ### How the identifier is resolved
 
@@ -77,7 +84,7 @@ The bridge trusts whatever developer identifier your application passes. It does
 
 ## 4. API Reference
 
-All responses are JSON. Errors return `{ "error": "<message>" }` with an appropriate HTTP status. All `GET` queue/item endpoints are cached (short TTL); `POST /claim` invalidates the relevant cache.
+All responses are JSON. Errors return `{ "error": "<message>" }` with an appropriate HTTP status. All `GET` queue/item endpoints are cached (short TTL); every write (`claim`, `release`, `done`) invalidates the affected queue's cache.
 
 ### 4.1 Health Check
 
@@ -112,7 +119,7 @@ No developer parameter required. Returns the bridge's status, Notion connectivit
 GET /queues?developer=<identifier>
 ```
 
-Returns every configured queue's claimable items for the developer, grouped by queue slug. This is the dashboard's home view — load it once on page open.
+Returns every configured queue's items for the developer, grouped by queue slug. Each queue's value is `{ items, claimed }` (see §4.3). This is the dashboard's home view — load it once on page open.
 
 **Response:**
 ```json
@@ -120,7 +127,8 @@ Returns every configured queue's claimable items for the developer, grouped by q
   "developer": "jdoe",
   "notionUserId": "a1b2c3d4-...",
   "queues": {
-    "work-items": [
+    "pulse-queue": {
+      "items": [
       {
         "id": "page-uuid-1",
         "url": "https://www.notion.so/...",
@@ -135,24 +143,30 @@ Returns every configured queue's claimable items for the developer, grouped by q
         ],
         "last_edited": "2026-09-24T10:00:00.000Z"
       }
-    ],
-    "issues": [
-      { "id": "page-uuid-2", "url": "...", "title": "...", "properties": [...], "display": [...], "last_edited": "..." }
-    ]
+      ],
+      "claimed": []
+    },
+    "solarwinds": {
+      "items": [ { "id": "page-uuid-2", "url": "...", "title": "...", "properties": [...], "display": [...], "last_edited": "..." } ],
+      "claimed": []
+    }
   }
 }
 ```
 
-**Filtering rules applied by the bridge:**
-- If the queue has an `assigneeProperty`: items assigned to this developer **or** unassigned items are included. Items assigned to other developers are excluded.
-- If the queue has `claimableStates`: only items whose status matches one of those states are included.
+**Filtering rules applied by the bridge (`items`):**
+- If the queue has an `assigneeTextProperty` (e.g. Solarwinds `Assignee Name`): only items whose text value equals the developer's Notion name (case-insensitive) are included.
+- Otherwise, if the queue has an `assigneeProperty` (a Person property) and `filterByAssignee` is not `false`: items assigned to this developer **or** unassigned items are included. Items assigned to other developers are excluded.
+- If the queue has `claimableStates`: only items whose status matches one of those states are included. The status property may be a status, select, or checkbox (checkboxes read as `"True"`/`"False"`).
+
+**`claimed`:** items in the queue's `claimedState` that are assigned to this developer — what they are currently working on. Empty for queues without a `claimedState`. Use it to restore a developer's board after a reload.
 
 **Error cases:**
 - `400` — developer identifier missing.
 - `404` — developer could not be resolved to a Notion user.
 - `500` — internal error (check the `error` message).
 
-**Note:** If a single queue fails (e.g., its data source is unreachable), that queue's value will be `{ "error": "<message>" }` rather than an array. Other queues are still returned. Your application should handle this gracefully — render the failed queue with an error state, not a blank list.
+**Note:** If a single queue fails (e.g., its data source is unreachable), that queue's value will be `{ "error": "<message>" }` instead of `{ items, claimed }`. Other queues are still returned. Your application should handle this gracefully — render the failed queue with an error state, not a blank list.
 
 ---
 
@@ -162,18 +176,23 @@ Returns every configured queue's claimable items for the developer, grouped by q
 GET /queues/:slug?developer=<identifier>
 ```
 
-Returns one queue's claimable items. Use this to refresh a single list without re-fetching all queues.
+Returns one queue's items. Use this to refresh a single list without re-fetching all queues.
 
 **Response:**
 ```json
 {
-  "queue": "work-items",
-  "developer": "jdoe",
+  "queue": "pulse-queue",
+  "developer": "jane.doe@example.com",
   "items": [
+    { "id": "...", "url": "...", "title": "...", "properties": [...], "display": [...], "last_edited": "..." }
+  ],
+  "claimed": [
     { "id": "...", "url": "...", "title": "...", "properties": [...], "display": [...], "last_edited": "..." }
   ]
 }
 ```
+
+`items` and `claimed` follow the rules in §4.2.
 
 **Error cases:** same as §4.2, plus `500` if the queue slug is unknown (the error message will say `Unknown queue`).
 
@@ -263,24 +282,26 @@ POST /items/:id/claim
 Content-Type: application/json
 
 {
-  "queue": "work-items",
+  "developer": "jane.doe@example.com",
+  "queue": "pulse-queue",
   "includeRelated": true
 }
 ```
 
-Plus the developer identifier via `?developer=<identifier>` or `X-Developer` header.
+(The developer may instead be passed via `?developer=` or the `X-Developer` header.)
 
-This is the **only write operation**. The bridge:
-1. Reads the item fresh (bypassing cache).
-2. Checks it is still claimable (assigned to this developer or unassigned; status in a claimable state).
-3. Writes the assignee (developer's Notion user id) and status (the queue's `claimedState`) back to Notion.
+This is one of three write operations (claim, release §4.7, done §4.8). The bridge:
+1. Rejects `readOnly` queues (`400`) and queues whose assignee property is not a Notion **Person** property (`400`).
+2. Reads the item fresh (bypassing cache) and checks it is still claimable (assigned to this developer or unassigned; status in a claimable state).
+3. Writes the assignee (developer's Notion user id) and status (the queue's `claimedState`) back to Notion. Writes are shaped by the property's type (status, select, checkbox, people, rich_text).
 4. Invalidates the queue's cache.
 5. Returns the updated item plus the related bundle (unless `includeRelated: false`).
 
 **Request body:**
 | Field | Required | Description |
 |---|---|---|
-| `queue` | recommended | The queue slug. Enables assignee/status writes and relation resolution. Without it, the claim skips property writes. |
+| `developer` | yes (or query/header) | The developer identifier. |
+| `queue` | **yes** | The queue slug. Determines which assignee/status properties to write and which relations to resolve. Unknown or missing → `404`. |
 | `includeRelated` | optional | Default `true`. Set `false` to skip the related bundle (faster, use if you'll fetch it separately). |
 
 **Success response (`201`):**
@@ -303,10 +324,12 @@ This is the **only write operation**. The bridge:
 **Error responses:**
 | Status | Meaning | Body |
 |---|---|---|
-| `400` | Developer not resolvable to a Notion user | `{ "error": "Could not resolve developer..." }` |
-| `404` | Item not found in Notion | `{ "error": "<Notion API message>" }` |
+| `400` | Developer missing or not resolvable to a Notion user | `{ "error": "Could not resolve developer..." }` |
+| `400` | Queue is read-only | `{ "error": "Queue \"solarwinds\" is read-only" }` |
+| `400` | Assignee property is not a Person property | `{ "error": "\"Developer\" must be a Person property in Notion (it is rich_text)" }` |
+| `404` | Unknown/missing queue, or item not found in Notion | `{ "error": "Unknown queue \"...\"" }` or `{ "error": "<Notion API message>" }` |
 | `409` | Already claimed by another developer, or not in a claimable state | `{ "error": "Item already claimed", "assignees": ["..."] }` or `{ "error": "Item not in a claimable state (current: \"Closed\")" }` |
-| `502` | Notion write failed | `{ "error": "Failed to write claim to Notion: ..." }` |
+| `502` | Notion write failed | `{ "error": "Failed to write to Notion: ..." }` |
 
 **Concurrency:** The bridge serializes concurrent claims on the same item id using an in-memory lock. If two developers claim the same item simultaneously, the first succeeds and the second gets `409`. Handle `409` by refreshing the queue list and showing the item as unavailable.
 
@@ -314,7 +337,97 @@ This is the **only write operation**. The bridge:
 
 ---
 
-### 4.7 Generic Page Read (Escape Hatch)
+### 4.7 Release an Item
+
+```
+POST /items/:id/release
+Content-Type: application/json
+
+{ "developer": "jane.doe@example.com", "queue": "pulse-queue" }
+```
+
+Un-claims an item so another developer can take it. Only the current assignee can release. The bridge clears the assignee (Person) property and sets the status to the queue's `releaseState` (default: the first of `claimableStates`).
+
+**Success (`200`):** `{ "item": { ...normalized item } }`
+
+**Errors:** `400` (read-only queue, queue has no assignee property, assignee not a Person property, developer unresolved), `404` (unknown queue / item), `409` (`Item is not claimed by this developer`), `502` (write failed).
+
+---
+
+### 4.8 Mark an Item Done
+
+```
+POST /items/:id/done
+Content-Type: application/json
+
+{ "developer": "jane.doe@example.com", "queue": "sprint-developer-items" }
+```
+
+Applies the queue's `done` map from the manifest — e.g. `{ "Mark Done": true, "Status": "Done" }` for Sprint Developer Items, `{ "Status": "Done" }` for Pulse. Allowed for the item's assignee, or anyone if the item is unassigned.
+
+**Success (`200`):** `{ "item": { ...normalized item } }`
+
+**Errors:** `400` (read-only queue, no `done` configured, assignee not a Person property, developer unresolved), `404`, `409` (`Item is assigned to another developer`), `502`.
+
+---
+
+### 4.9 Current Sprint
+
+```
+GET /sprint/current
+```
+
+No developer required. Reads the manifest's `sprint` source (the Sprints database), finds the row whose `statusProperty` equals `currentState` (e.g. `Focus`), and returns:
+
+```json
+{
+  "id": "page-uuid",
+  "url": "https://app.notion.com/p/...",
+  "name": "Sprint 20",
+  "number": 20,
+  "start": "2026-09-23",
+  "end": "2026-10-06"
+}
+```
+
+- `number` is parsed from the title (`"Sprint 20"` → `20`).
+- `end` is the `endDateProperty` (Deadline); `start` = `end − (lengthDays − 1)`.
+- Cached 5 minutes. `500` if no row, or more than one row, is in the current state.
+
+---
+
+### 4.10 Daily Standup Brief
+
+```
+GET /standup/today?developer=<identifier>
+```
+
+Finds the current sprint's standup pages (child pages titled `M/D Standup`, anywhere in the sprint page's block tree), picks **today's** — or the most recent earlier one that has briefs — and returns the developer's **Morning Brief** (child page `… – Morning Brief – {FirstName}`), or the **Leadership Summary** when that developer has no brief.
+
+```json
+{
+  "sprint": "Sprint 20",
+  "date": "2026-09-29",
+  "isToday": true,
+  "standupPageId": "uuid",
+  "pageId": "uuid",
+  "title": "Sprint 20 – 2026-09-29 – Morning Brief – Philip",
+  "mode": "brief",
+  "teamItems":        [ { "text": "Prepare for the TalkDesk cutover…", "mentions": [] } ],
+  "responsibilities": [ { "text": "Complete Move Holiday Loans to STG…", "mentions": ["0ac7dd04-…"] } ],
+  "aging":            [ { "text": "Document dev changes checklist… — active since August 31", "mentions": ["d273abeb-…"] } ],
+  "summaries": []
+}
+```
+
+- `mode` is `"brief"`, `"leadership"` (then `summaries` holds `{ developer, text }` per developer and `responsibilities`/`aging` are empty), or `"none"` (no briefs yet this sprint).
+- `mentions` are the Notion page ids @-mentioned on that line — for responsibilities and aging items these are Sprint Developer Items ids, so they match queue item ids and can be linked to cards.
+- `isToday: false` means today's brief hasn't been generated yet; show the date so the user knows it's the previous one.
+- Section headings and title patterns are configured in the manifest `standups` block. Cached 5 minutes (page tree 10 minutes) — poll every few minutes to pick up a newly generated brief.
+
+---
+
+### 4.11 Generic Page Read (Escape Hatch)
 
 ```
 GET /pages/:id
@@ -330,13 +443,13 @@ No developer parameter required. Cached by page id.
 
 ---
 
-### 4.8 Generic Database Query (Escape Hatch)
+### 4.12 Generic Database Query (Escape Hatch)
 
 ```
 GET /databases/:slug/query?status=<value>
 ```
 
-Returns all rows of a queue's database **without** assignee/status filtering. Use this for custom views (e.g., "all high-priority items regardless of assignee").
+Returns all rows of a queue's database **without** assignee/status filtering. Use this for custom views (e.g., "all high-priority items regardless of assignee") and for reference data such as `deadlines-milestones` (the dashboard's calendar and ticker read `Start Date`/`End Date` from its `display`).
 
 - `:slug` — the queue slug (must be configured in the manifest).
 - `?status=<value>` — optional in-memory status filter.
@@ -389,7 +502,7 @@ async function checkBridgeHealth(bridgeUrl) {
 
 ### Step 3: Load Queues
 
-When the dashboard loads, call `GET /queues?developer=<id>` to get all claimable lists at once. Render each queue as a list. Use the `display` array for the list item summary (it contains the manifest's `displayProperties` in order), and `title` as the primary label.
+When the dashboard loads, call `GET /queues?developer=<id>` (or `GET /queues/:slug` per queue) to get the lists. Each queue returns `{ items, claimed }` — render `items` in the queue list and put `claimed` items on the developer's board. Render each queue as a list. Use the `display` array for the list item summary (it contains the manifest's `displayProperties` in order), and `title` as the primary label.
 
 ```javascript
 async function loadQueues(bridgeUrl, developer) {
@@ -418,7 +531,7 @@ async function claimItem(bridgeUrl, developer, itemId, queueSlug) {
   const res = await fetch(`${bridgeUrl}/items/${itemId}/claim?developer=${encodeURIComponent(developer)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ queue: queueSlug, includeRelated: true }),
+    body: JSON.stringify({ queue: queueSlug, includeRelated: true }),  // queue is required
   });
 
   if (res.status === 201) {
@@ -467,7 +580,18 @@ Handle the three related-entity states:
 - **Inaccessible** — has `error` but no `title`. Show "This item's parent could not be loaded."
 - **Unlinked** — has `empty: true` and `id: null`. Show "No parent linked to this item."
 
-### Step 6: Optional — Generic Page Reads
+### Step 6: Release and Mark Done
+
+- **Release** (`POST /items/:id/release`) when the developer puts a claimed item back. Only the assignee can release; handle `409` by refreshing.
+- **Mark done** (`POST /items/:id/done`) removes the item from the developer's lists on success. Only queues with a `done` map support it — hide the action for others.
+- For a responsive UI, move the card immediately and roll it back if the write fails (the reference dashboard does this and shows the bridge's error message).
+
+### Step 7: Sprint and Standup Context
+
+- Call `GET /sprint/current` for the header (name, dates, days left) and for anything sprint-relative (the reference dashboard raises Pulse priority when an item's Sprint is behind the current number).
+- Call `GET /standup/today?developer=<id>` every few minutes. Render `responsibilities` and `aging` for developers, `summaries` for leads, and `teamItems` wherever team-wide news belongs (the reference dashboard scrolls them in a ticker). Link lines whose `mentions` match a queue item id.
+
+### Step 8: Optional — Generic Page Reads
 
 If your dashboard needs to render arbitrary Notion pages (e.g., a sub-page the user clicks into), use `GET /pages/:id` or `GET /pages/:id/full`. These work with any page id shared with the integration, no queue or developer context needed.
 
@@ -527,6 +651,26 @@ Error/empty variants:
 { "relation": "initiative", "queue": "epics", "id": null, "empty": true }
 ```
 
+### Manifest Queue Options
+
+Configured per queue in the bridge's `config/manifest.json` (schema: `manifest.schema.json`). Useful to know when deciding what a queue supports.
+
+| Field | Meaning |
+|---|---|
+| `slug`, `source.title` / `source.id` | Queue id and the Notion data source it reads |
+| `assigneeProperty` | Person property used for filtering and written on claim |
+| `assigneeTextProperty` | Text property matched against the developer's Notion name (filter only) |
+| `filterByAssignee` | `false` lists every claimable row regardless of assignee |
+| `statusProperty`, `claimableStates` | Which rows are listed (status, select, or checkbox) |
+| `claimedState` | Status written on claim; rows in it assigned to the developer appear in `claimed` |
+| `releaseState` | Status written on release (default: first claimable state) |
+| `done` | Property → value map written by `/done` |
+| `readOnly` | Refuse all writes |
+| `relations` | `{ name: { property, targetQueue } }` followed by `/related` |
+| `displayProperties` | Properties copied into each item's `display` array |
+
+Top-level blocks: `identity` (developer → Notion user), `sprint` (current-sprint lookup, §4.9), `standups` (standup/brief title patterns and section headings, §4.10).
+
 ---
 
 ## 7. Error Handling Summary
@@ -537,7 +681,11 @@ Error/empty variants:
 | Item already claimed | `409` | Refresh the queue; show item as unavailable |
 | Item not in a claimable state | `409` | Refresh the queue; the item's status changed since the list was loaded |
 | Item not found in Notion | `404` | Remove the item from the list; it may have been deleted or archived |
-| Notion write failed on claim | `502` | Retry once; if it persists, show a transient error and let the user retry |
+| Notion write failed on claim/release/done | `502` | Retry once; if it persists, show a transient error and let the user retry |
+| Write to a read-only queue | `400` | Don't offer claim/release/done for that queue |
+| Assignee property isn't a Person property | `400` | Bridge-side Notion config issue — change the property type in Notion |
+| Release by someone who isn't the assignee | `409` | Refresh; the item belongs to someone else |
+| No brief yet today | `200` with `isToday: false` | Show the latest brief with its date |
 | Single queue fails in `/queues` | `200` (queue value is `{ error }`) | Render that queue with an error state; show the rest |
 | Bridge unreachable | network error | Show "bridge offline" state; retry on a timer |
 
@@ -559,7 +707,11 @@ Use this checklist to verify your integration is complete:
 - [ ] Startup health check is implemented and degrades gracefully.
 - [ ] Queue lists render `title` and `display` fields.
 - [ ] Per-queue errors (queue value is `{ error }`) are handled without crashing.
-- [ ] Claim handles `201` (success), `409` (conflict), `400` (developer not resolved), and `502` (write failure).
+- [ ] Claim handles `201` (success), `409` (conflict), `400` (developer not resolved / read-only / non-Person assignee), `404` (unknown queue), and `502` (write failure).
+- [ ] The `queue` slug is sent on every claim, release, and done.
+- [ ] `claimed` items from queue responses are restored onto the developer's board.
+- [ ] Release and done are only offered where the queue supports them (not `readOnly`; `done` configured).
+- [ ] The standup brief is polled, shows its date when `isToday` is false, and handles `mode: "leadership"` and `"none"`.
 - [ ] After a successful claim, the item is removed/moved in the UI and the related context is rendered.
 - [ ] Related entities handle all three states: resolved, inaccessible (`error`), unlinked (`empty: true`).
 - [ ] `409` conflict triggers a queue refresh.
@@ -575,7 +727,7 @@ Use this checklist to verify your integration is complete:
 
 2. **Passing the developer identifier from client-side input without validation.** The bridge trusts it. If your frontend sends `?developer=admin` and your backend doesn't verify that the authenticated user is actually "admin," any user can claim items as anyone.
 
-3. **Ignoring the `queue` parameter on claim.** Without `queue`, the bridge doesn't know which assignee/status properties to write. The claim will "succeed" but won't actually update Notion. Always pass the queue slug.
+3. **Omitting the `queue` parameter on writes.** Claim, release, and done all need the queue slug to know which properties to write; without it the bridge returns `404 Unknown queue`. Always pass it.
 
 4. **Treating `409` as a transient error and retrying.** A `409` means the item is genuinely unavailable (claimed by someone else or wrong status). Retrying will just produce another `409`. Refresh the list instead.
 
@@ -583,4 +735,6 @@ Use this checklist to verify your integration is complete:
 
 6. **Polling all queues rapidly.** The bridge caches, but aggressive polling still generates Notion API calls on cache misses. Use a reasonable interval (30–60s) or manual refresh.
 
-7. **Forgetting to URL-encode the developer identifier.** If the identifier is an email (e.g., `jane.doe@example.com`), the `@` and `.` are technically safe but other characters may not be. Always `encodeURIComponent` it.
+7. **Using a Text property as the assignee.** Claiming writes a Notion user id; the assignee (`assigneeProperty`) must be a **Person** property. The bridge refuses writes otherwise. Text assignees are only supported for read-only filtering via `assigneeTextProperty`.
+
+8. **Forgetting to URL-encode the developer identifier.** If the identifier is an email (e.g., `jane.doe@example.com`), the `@` and `.` are technically safe but other characters may not be. Always `encodeURIComponent` it.
