@@ -1,47 +1,16 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type TaskType = 'story' | 'task' | 'bug' | 'spike' | 'alert' | 'ticket' | 'incident'
-type Priority = 'critical' | 'high' | 'medium' | 'low'
-type Status = 'queue' | 'today' | 'working' | 'blocked'
-type QueueSource = 'stories' | 'tasks' | 'pulse' | 'solarwinds' | 'zendesk' | 'ads'
-
-interface Initiative {
-  id: string
-  name: string
-  goal: string
-  owner: string
-  progress: number
-  dueDate: string
-  status: 'on-track' | 'at-risk' | 'blocked'
-}
-
-interface Task {
-  id: string
-  type: TaskType
-  source: QueueSource
-  title: string
-  description: string
-  priority: Priority
-  points?: number
-  progress: number
-  assignee: string
-  sprint?: string
-  tags: string[]
-  status: Status
-  blockedReason?: string
-  subtasks?: { title: string; done: boolean }[]
-  comments: number
-  branch?: string
-  initiative?: Initiative
-  acceptanceCriteria?: string[]
-  severity?: string
-  affectedSystem?: string
-  reportedBy?: string
-  environment?: string
-  activity?: { user: string; time: string; text: string }[]
-}
+import type { Initiative, Priority, QueueSource, Status, Task, TaskType } from './types'
+import {
+  BRIDGE_QUEUES, BRIDGE_REFRESH_MS, CALENDAR_LOOKAHEAD_DAYS, CONTEXT_REFRESH_MS, DEADLINE_TICKER_DAYS,
+  DEVELOPER_STORAGE_KEY, STALE_STANDUP_DAYS, TEST_DEVELOPERS,
+  addDays, bridgeQueueFor, claimItem, daysBetween, deadlineTickerText, fetchCurrentSprint, fetchDeadlines,
+  fetchQueue, fetchRelated, fetchStandup, formatSprintRange, loadDeveloper, loadLanes, localIsoDate,
+  markItemDone, releaseItem, shortDate, updateLanes,
+} from './bridge'
+import type { BriefLine, Deadline, RelatedEntity, Sprint, StandupBrief } from './bridge'
+import BootScreen from './BootScreen'
+import type { BootStep, BootStepState } from './BootScreen'
 
 // ─── Mock Initiatives ─────────────────────────────────────────────────────────
 
@@ -90,108 +59,6 @@ const INITIAL_TASKS: Task[] = [
     tags: ['feed', 'realtime'], status: 'queue', comments: 2,
     initiative: INITIATIVES['INIT-09'],
     acceptanceCriteria: ['WebSocket-pushed updates', 'Filter by user, event type, date range', 'Infinite scroll', 'Exportable as CSV'],
-  },
-
-  // Tasks
-  {
-    id: 'DT-0892', type: 'task', source: 'tasks', title: 'Migrate API client to v3 SDK',
-    description: 'Replace deprecated v2 endpoints. Update all 47 call sites. Update error handling to new error schema. Remove v2 compatibility shim.',
-    priority: 'high', points: 5, progress: 65, assignee: 'AR', sprint: 'SPR-42',
-    tags: ['refactor', 'api'], status: 'queue', comments: 7, branch: 'chore/api-v3',
-    initiative: INITIATIVES['INIT-05'],
-    subtasks: [{ title: 'Audit all v2 call sites', done: true }, { title: 'Update auth client', done: true }, { title: 'Update orders client', done: false }, { title: 'Update reporting client', done: false }, { title: 'Remove shim + integration tests', done: false }],
-    activity: [{ user: 'AR', time: '09:45', text: 'Auth and user clients done. Orders next.' }, { user: 'JR', time: '08:20', text: 'PR #1204 opened for review' }],
-  },
-  {
-    id: 'DT-0889', type: 'task', source: 'tasks', title: 'Add Redis caching layer',
-    description: 'Cache frequently queried endpoints with configurable TTL per route. Implement cache invalidation on write operations.',
-    priority: 'high', points: 8, progress: 0, assignee: 'JR', sprint: 'SPR-42',
-    tags: ['performance', 'infra'], status: 'queue', comments: 3,
-    initiative: INITIATIVES['INIT-03'],
-    acceptanceCriteria: ['Cache hit rate >80% on /products and /users', 'TTL configurable per route via env', 'Invalidation on write within 50ms', 'Cache bypass header for admin'],
-  },
-  {
-    id: 'DT-0884', type: 'bug', source: 'tasks', title: 'Race condition in cart reducer',
-    description: 'Concurrent add-to-cart actions corrupt Redux state. Repro: rapid-click multiple items. Root cause: thunks dispatched before prior action resolves.',
-    priority: 'critical', points: 3, progress: 0, assignee: 'MK', sprint: 'SPR-42',
-    tags: ['bug', 'redux'], status: 'queue', comments: 12,
-    initiative: INITIATIVES['INIT-09'],
-    activity: [{ user: 'MK', time: '09:00', text: 'Confirmed race on thunk dispatch. Queuing fix.' }, { user: 'AR', time: '08:10', text: 'Repro rate 100% with 3+ concurrent clicks' }],
-  },
-  {
-    id: 'DT-0880', type: 'spike', source: 'tasks', title: 'Evaluate OpenTelemetry tracing',
-    description: 'POC for distributed tracing across 12 services. Compare Jaeger vs Grafana Tempo backends. Document sampling strategy and storage cost estimates.',
-    priority: 'medium', points: 3, progress: 0, assignee: 'AR', sprint: 'SPR-42',
-    tags: ['observability', 'research'], status: 'queue', comments: 0,
-    initiative: INITIATIVES['INIT-03'],
-    acceptanceCriteria: ['Working OTEL collector config', 'Trace 3 critical user flows end-to-end', 'Cost model for 30-day retention', 'Decision doc in Confluence'],
-  },
-  {
-    id: 'DT-0876', type: 'bug', source: 'tasks', title: 'WebSocket reconnect drops messages',
-    description: 'Messages sent during the reconnect window are silently discarded. Need an offline queue with replay on reconnect.',
-    priority: 'high', points: 5, progress: 0, assignee: 'JR', sprint: 'SPR-42',
-    tags: ['websocket', 'reliability'], status: 'queue', comments: 6,
-    initiative: INITIATIVES['INIT-03'],
-  },
-  {
-    id: 'DT-0871', type: 'task', source: 'tasks', title: 'Schema migration for audit logs',
-    description: 'Add indexed columns for actor_id and resource_type. Backfill existing 4.2M rows in batches to avoid table lock.',
-    priority: 'high', points: 5, progress: 0, assignee: 'AR', sprint: 'SPR-43',
-    tags: ['db', 'migration'], status: 'queue', comments: 4,
-    initiative: INITIATIVES['INIT-07'],
-  },
-
-  // Pulse
-  {
-    id: 'PULSE-0041', type: 'alert', source: 'pulse', title: 'Memory leak · auth-service pod',
-    description: 'Heap usage climbing 2% per hour. Currently at 87%. OOMKill projected in ~6h without intervention. Likely connection pool not releasing on JWT validation path.',
-    priority: 'critical', progress: 0, assignee: 'JR',
-    tags: ['memory', 'auth-service', 'k8s'], status: 'queue', comments: 2,
-    severity: 'P1', affectedSystem: 'auth-service · prod-east-1',
-    initiative: INITIATIVES['INIT-03'],
-    activity: [{ user: 'PULSE', time: '09:47', text: 'Heap crossed 85% threshold. Alert fired.' }, { user: 'JR', time: '09:50', text: 'Acknowledged. Investigating connection pool.' }],
-  },
-  {
-    id: 'PULSE-0039', type: 'alert', source: 'pulse', title: 'CI pipeline build time +340%',
-    description: 'Average build time increased from 4min to 18min over the last 48h. Correlation with test parallelism change on Sep 20.',
-    priority: 'high', progress: 0, assignee: 'AR',
-    tags: ['ci', 'performance', 'github-actions'], status: 'queue', comments: 1,
-    severity: 'P2', affectedSystem: 'GitHub Actions · main branch',
-    initiative: INITIATIVES['INIT-05'],
-  },
-  {
-    id: 'PULSE-0037', type: 'alert', source: 'pulse', title: 'DB connection pool exhausted',
-    description: 'prod-orders RDS instance hitting max_connections (500) during business hours. Pool exhaustion causing 503s on order submission.',
-    priority: 'critical', progress: 0, assignee: 'AR',
-    tags: ['database', 'rds', 'prod'], status: 'queue', comments: 5,
-    severity: 'P1', affectedSystem: 'RDS prod-orders · us-east-1',
-    initiative: INITIATIVES['INIT-03'],
-  },
-
-  // Solarwinds
-  {
-    id: 'SW-2291', type: 'incident', source: 'solarwinds', title: 'Cross-AZ latency spike · 340ms avg',
-    description: 'Network latency between AZ-East and AZ-West elevated since 07:12 UTC. Average 340ms vs baseline 18ms. BGP route change suspected.',
-    priority: 'high', progress: 0, assignee: 'AR',
-    tags: ['network', 'latency', 'az'], status: 'queue', comments: 3,
-    severity: 'SEV-2', affectedSystem: 'AZ-East ↔ AZ-West fabric',
-    environment: 'Production',
-  },
-  {
-    id: 'SW-2288', type: 'incident', source: 'solarwinds', title: 'Disk at 94% · media-storage-02',
-    description: 'media-storage-02 volume reaching capacity. At current ingest rate (12GB/h), full in approximately 5.5 hours. Log rotation not running since Sep 19.',
-    priority: 'critical', progress: 0, assignee: 'JR',
-    tags: ['disk', 'storage', 'infra'], status: 'queue', comments: 1,
-    severity: 'SEV-1', affectedSystem: 'media-storage-02 · /data',
-    environment: 'Production',
-  },
-  {
-    id: 'SW-2285', type: 'task', source: 'solarwinds', title: 'TLS cert expiry in 8 days',
-    description: 'api.example.com TLS certificate expires Oct 1. Auto-renewal via Let\'s Encrypt failed — ACME challenge DNS record missing.',
-    priority: 'high', progress: 0, assignee: 'AR',
-    tags: ['tls', 'cert', 'dns'], status: 'queue', comments: 0,
-    severity: 'SEV-2', affectedSystem: 'api.example.com',
-    environment: 'Production',
   },
 
   // Zendesk
@@ -250,35 +117,6 @@ const INITIAL_TASKS: Task[] = [
   },
 ]
 
-const TICKER_ITEMS = [
-  { icon: '🚀', text: 'v2.14.3 deployed to staging · 3 failing E2E tests', src: 'ADS' },
-  { icon: '⚠️', text: 'API latency spike /orders · p99 820ms · investigating', src: 'PULSE' },
-  { icon: '👁', text: 'PR #1204 awaiting 2 reviewers · DT-0892', src: 'GIT' },
-  { icon: '🎟', text: 'ZD-8836 Safari OAuth · 23 users affected · P1', src: 'ZD' },
-  { icon: '💾', text: 'media-storage-02 · 94% disk · 5.5h to full', src: 'SW' },
-  { icon: '🔒', text: 'TLS cert api.example.com · expires in 8 days', src: 'SW' },
-  { icon: '📋', text: 'Sprint review Friday 3PM · demo scope confirmed', src: 'TEAM' },
-  { icon: '🔥', text: 'PULSE-0037 · DB connection pool exhausted · P1', src: 'PULSE' },
-]
-
-const SPRINT_DAYS = [
-  { d: 15, label: 'M', event: 'Sprint Start', type: 'start' },
-  { d: 16, label: 'T', event: null, type: null },
-  { d: 17, label: 'W', event: 'Backlog Grooming 2PM', type: 'meeting' },
-  { d: 18, label: 'T', event: null, type: null },
-  { d: 19, label: 'F', event: null, type: null },
-  { d: 22, label: 'M', event: 'TODAY', type: 'today' },
-  { d: 23, label: 'T', event: null, type: null },
-  { d: 24, label: 'W', event: 'Mid-Sprint Review', type: 'meeting' },
-  { d: 25, label: 'T', event: null, type: null },
-  { d: 26, label: 'F', event: null, type: null },
-  { d: 29, label: 'M', event: null, type: null },
-  { d: 30, label: 'T', event: null, type: null },
-  { d: 1,  label: 'W', event: null, type: null },
-  { d: 2,  label: 'T', event: null, type: null },
-  { d: 3,  label: 'F', event: 'Sprint Review 3PM', type: 'end' },
-]
-
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const PRIORITY_CONFIG = {
@@ -286,6 +124,7 @@ const PRIORITY_CONFIG = {
   high:     { label: 'HIGH', color: '#ffaa00' },
   medium:   { label: 'MED',  color: '#00d4ff' },
   low:      { label: 'LOW',  color: '#4a6a84' },
+  none:     { label: '—',    color: '#4a6a84' },
 }
 
 const TYPE_CONFIG: Record<TaskType, { label: string; cls: string }> = {
@@ -341,11 +180,22 @@ function Tag({ children, cls }: { children: React.ReactNode; cls: string }) {
 
 // ─── Task Card ────────────────────────────────────────────────────────────────
 
-function TaskCard({ task, onDragStart, compact = false, onClick }: {
+function DoneButton({ onDone, size = 8 }: { onDone: () => void; size?: number }) {
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); onDone() }}
+      title="Mark done in Notion"
+      style={{ fontFamily: 'JetBrains Mono', fontSize: size, color: '#00ff88', background: 'rgba(0,255,136,0.08)', border: '1px solid rgba(0,255,136,0.3)', padding: '1px 5px', borderRadius: 2, cursor: 'pointer', letterSpacing: '0.08em' }}
+    >✓ DONE</button>
+  )
+}
+
+function TaskCard({ task, onDragStart, compact = false, onClick, onDone }: {
   task: Task
   onDragStart: (e: React.DragEvent, id: string) => void
   compact?: boolean
   onClick?: () => void
+  onDone?: () => void
 }) {
   const pc = PRIORITY_CONFIG[task.priority]
   const tc = TYPE_CONFIG[task.type]
@@ -359,7 +209,7 @@ function TaskCard({ task, onDragStart, compact = false, onClick }: {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
         <Tag cls={tc.cls}>{tc.label}</Tag>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>{task.id}</span>
+        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>{task.ref ?? task.id}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 5, alignItems: 'center' }}>
           <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: pc.color, fontWeight: 700 }}>
             <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: pc.color, marginRight: 4, boxShadow: `0 0 4px ${pc.color}` }} />
@@ -367,6 +217,7 @@ function TaskCard({ task, onDragStart, compact = false, onClick }: {
           </span>
           {task.points && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: 2, color: '#7aa0c0' }}>{task.points}pt</span>}
           {task.severity && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, background: 'rgba(255,51,85,0.1)', padding: '1px 5px', borderRadius: 2, color: '#ff6680', border: '1px solid rgba(255,51,85,0.2)' }}>{task.severity}</span>}
+          {onDone && <DoneButton onDone={onDone} />}
         </div>
       </div>
 
@@ -374,6 +225,9 @@ function TaskCard({ task, onDragStart, compact = false, onClick }: {
 
       {!compact && (
         <>
+          {task.notes && (
+            <div style={{ fontSize: 10, color: '#7aa0c0', lineHeight: 1.45, marginBottom: 5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{task.notes}</div>
+          )}
           {task.progress > 0 && (
             <div style={{ marginBottom: 5 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
@@ -384,10 +238,11 @@ function TaskCard({ task, onDragStart, compact = false, onClick }: {
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
-            <Avatar initials={task.assignee} color={ASSIGNEE_COLORS[task.assignee] || '#00d4ff'} />
+            {task.assignee && <Avatar initials={task.assignee} color={ASSIGNEE_COLORS[task.assignee] || '#00d4ff'} />}
             {task.affectedSystem && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{task.affectedSystem}</span>}
             {task.branch && !task.affectedSystem && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>⎇ {task.branch}</span>}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+              {task.standupAgeDays !== undefined && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: task.standupAgeDays > STALE_STANDUP_DAYS ? '#ffaa00' : '#4a6a84' }}>STANDUP {task.standupAgeDays}d</span>}
               {task.comments > 0 && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>💬 {task.comments}</span>}
               {task.sprint && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>{task.sprint}</span>}
             </div>
@@ -417,7 +272,7 @@ function DetailModal({ task, onClose }: { task: Task; onClose: () => void }) {
         {/* Modal header */}
         <div style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(0,212,255,0.06)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <Tag cls={tc.cls}>{tc.label}</Tag>
-          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84' }}>{task.id}</span>
+          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84' }}>{task.ref ?? task.id}</span>
           {srcTab && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, padding: '1px 6px', borderRadius: 2, background: `${srcTab.color}18`, border: `1px solid ${srcTab.color}44`, color: srcTab.color }}>via {srcTab.label}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: pc.color, fontWeight: 700 }}>
@@ -562,7 +417,122 @@ function InitiativePanel({ initiative }: { initiative: Initiative }) {
 
 // ─── Working Space ────────────────────────────────────────────────────────────
 
-function WorkingSpace({ task, onClear, onDragStart }: { task: Task | null; onClear: () => void; onDragStart: (e: React.DragEvent, id: string) => void }) {
+const RELATION_LABELS: Record<string, string> = { initiative: 'INITIATIVE', issue: 'ISSUE', analystIssue: 'ANALYST ISSUE' }
+const RELATION_FIELDS: Record<string, string[]> = {
+  initiative: ['Status', 'Impact', 'Deadline', 'Countdown'],
+  issue: ['Status', 'Priority'],
+  analystIssue: ['Status', 'Priority'],
+}
+const RELATION_TEXT_FIELDS = ['Description', 'Notes']
+
+const relationLabel = (entity: RelatedEntity) => RELATION_LABELS[entity.relation] ?? entity.relation.toUpperCase()
+
+function RelatedCard({ entity, onOpen }: { entity: RelatedEntity; onOpen: () => void }) {
+  const prop = (name: string) => entity.properties?.find(p => p.name === name)?.value ?? ''
+  const fields = (RELATION_FIELDS[entity.relation] ?? []).map(name => [name, prop(name)] as const).filter(([, v]) => v)
+  const text = RELATION_TEXT_FIELDS.map(prop).find(Boolean) || entity.content || ''
+  return (
+    <div onClick={entity.error ? undefined : onOpen} title={entity.error ? undefined : 'Click to expand'} style={{ padding: '8px 9px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.14)', borderRadius: 3, cursor: entity.error ? 'default' : 'zoom-in' }}>
+      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.12em', color: '#4a6a84', marginBottom: 4 }}>{relationLabel(entity)}</div>
+      {entity.error ? (
+        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680' }}>Unavailable — {entity.error}</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#e0f0ff', lineHeight: 1.3, marginBottom: 5 }}>{entity.title}</div>
+          {fields.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 5 }}>
+              {fields.map(([name, value]) => (
+                <span key={name} style={{ fontFamily: 'JetBrains Mono', fontSize: 8, padding: '1px 5px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, color: '#9bbdd4' }}>
+                  <span style={{ color: '#4a6a84' }}>{name.toUpperCase()} </span>{value}
+                </span>
+              ))}
+            </div>
+          )}
+          {text && <div style={{ fontSize: 10, color: '#7aa0c0', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden', whiteSpace: 'pre-line' }}>{text}</div>}
+          {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-block', marginTop: 5, fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN NOTION ↗</a>}
+        </>
+      )}
+    </div>
+  )
+}
+
+function RelatedPanel({ related }: { related: RelatedEntity[] | 'loading' | { error: string } | undefined }) {
+  if (related === undefined || related === 'loading') {
+    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>LOADING CONTEXT…</span>
+  }
+  if (!Array.isArray(related)) {
+    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680' }}>{related.error}</span>
+  }
+  const linked = related.filter(r => !r.empty)
+  if (linked.length === 0) {
+    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.6 }}>No initiative or issue linked</span>
+  }
+  return <RelatedCards linked={linked} />
+}
+
+function RelatedCards({ linked }: { linked: RelatedEntity[] }) {
+  const [open, setOpen] = useState<RelatedEntity | null>(null)
+  return (
+    <>
+      {linked.map(r => <RelatedCard key={`${r.relation}:${r.id}`} entity={r} onOpen={() => setOpen(r)} />)}
+      {open && <RelatedModal entity={open} onClose={() => setOpen(null)} />}
+    </>
+  )
+}
+
+const notionPageUrl = (id: string) => `https://app.notion.com/p/${id.replace(/-/g, '')}`
+
+function RelatedModal({ entity, onClose }: { entity: RelatedEntity; onClose: () => void }) {
+  const props = (entity.properties ?? []).filter(p => p.value && p.type !== 'relation')
+  const longText = props.filter(p => RELATION_TEXT_FIELDS.includes(p.name))
+  const fields = props.filter(p => !RELATION_TEXT_FIELDS.includes(p.name))
+  const content = (entity.content ?? '').split('\n').filter(l => !l.startsWith('[Sub-page:')).join('\n').trim()
+  return (
+    <Overlay onClose={onClose}>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(0,212,255,0.06)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.12em', color: '#00d4ff' }}>{relationLabel(entity)}</span>
+        {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN NOTION ↗</a>}
+        <button onClick={onClose} title="Close (Esc)" style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', width: 24, height: 24, borderRadius: 3, cursor: 'pointer' }}>✕</button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14, zoom: 1.2 }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: '#e0f0ff', lineHeight: 1.3 }}>{entity.title}</div>
+        {fields.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {fields.map(p => <MetaBadge key={p.name} label={p.name.toUpperCase()} value={p.value} />)}
+          </div>
+        )}
+        {longText.map(p => (
+          <Section key={p.name} label={p.name.toUpperCase()}>
+            <div style={{ fontSize: 12, color: '#c8dff0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{p.value}</div>
+          </Section>
+        ))}
+        {content && (
+          <Section label="PAGE CONTENT">
+            <div style={{ fontSize: 12, color: '#c8dff0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{content}</div>
+          </Section>
+        )}
+        {entity.sub_pages && entity.sub_pages.length > 0 && (
+          <Section label={`SUB-PAGES — ${entity.sub_pages.length}`}>
+            {entity.sub_pages.map(sp => (
+              <a key={sp.id} href={notionPageUrl(sp.id)} target="_blank" rel="noreferrer" style={{ display: 'block', padding: '4px 0', fontSize: 12, color: '#00d4ff', textDecoration: 'none' }}>{sp.title || 'Untitled'} ↗</a>
+            ))}
+          </Section>
+        )}
+        {!content && longText.length === 0 && (
+          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>No description or page content.</span>
+        )}
+      </div>
+    </Overlay>
+  )
+}
+
+function WorkingSpace({ task, related, onClear, onDone, onDragStart }: {
+  task: Task | null
+  related?: RelatedEntity[] | 'loading' | { error: string }
+  onClear: () => void
+  onDone?: () => void
+  onDragStart: (e: React.DragEvent, id: string) => void
+}) {
   if (!task) {
     return (
       <div className="panel" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed', borderColor: 'rgba(0,212,255,0.18)', minHeight: 200 }}>
@@ -587,12 +557,16 @@ function WorkingSpace({ task, onClear, onDragStart }: { task: Task | null; onCle
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#00ff88', boxShadow: '0 0 8px #00ff88', flexShrink: 0 }} className="pulse" />
         <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', color: '#00d4ff' }}>ACTIVE</span>
         <Tag cls={tc.cls}>{tc.label}</Tag>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>{task.id}</span>
+        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>{task.ref ?? task.id}</span>
+        {task.url && <a href={task.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>NOTION ↗</a>}
+        {task.link && <a href={task.link} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>TICKET ↗</a>}
+        <span style={{ marginLeft: 'auto' }} />
+        {onDone && <DoneButton onDone={onDone} size={9} />}
         <button
           draggable
           onDragStart={e => onDragStart(e, task.id)}
           onClick={onClear}
-          style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 2, cursor: 'pointer', letterSpacing: '0.1em' }}
+          style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 2, cursor: 'pointer', letterSpacing: '0.1em' }}
           title="Drag back to queue or click to clear"
         >RETURN ×</button>
       </div>
@@ -610,7 +584,7 @@ function WorkingSpace({ task, onClear, onDragStart }: { task: Task | null; onCle
               <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
                 <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: pc.color, fontWeight: 700 }}>{pc.label}</span>
                 {task.points && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>{task.points}pt</span>}
-                <Avatar initials={task.assignee} color={ASSIGNEE_COLORS[task.assignee] || '#00d4ff'} />
+                {task.assignee && <Avatar initials={task.assignee} color={ASSIGNEE_COLORS[task.assignee] || '#00d4ff'} />}
               </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -663,10 +637,12 @@ function WorkingSpace({ task, onClear, onDragStart }: { task: Task | null; onCle
         </div>
 
         {/* Right: initiative/project context */}
-        <div style={{ width: 200, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+        <div style={{ width: task.queue ? 250 : 200, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
           <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.15em', color: '#4a6a84', paddingBottom: 6, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>PROJECT CONTEXT</div>
 
-          {task.initiative ? (
+          {task.queue ? (
+            <RelatedPanel related={related} />
+          ) : task.initiative ? (
             <>
               <div>
                 <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', marginBottom: 4 }}>INITIATIVE</div>
@@ -748,38 +724,170 @@ function ContextField({ label, value, color = '#c8dff0' }: { label: string; valu
 
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS)
-  const [workingId, setWorkingId] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<'today' | 'working' | 'blocked' | 'queue' | null>(null)
   const [centerTab, setCenterTab] = useState<'brief' | 'calendar'>('brief')
   const [queueTab, setQueueTab] = useState<QueueSource>('stories')
   const [modalTask, setModalTask] = useState<Task | null>(null)
   const [time, setTime] = useState(new Date())
+  const [bridgeLoading, setBridgeLoading] = useState(true)
+  const [bridgeErrors, setBridgeErrors] = useState<Partial<Record<QueueSource, string>>>({})
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [sprint, setSprint] = useState<Sprint | null>(null)
+  const [developer, setDeveloper] = useState(loadDeveloper)
+  const [brief, setBrief] = useState<StandupBrief | { error: string } | null>(null)
+  const [deadlines, setDeadlines] = useState<Deadline[]>([])
+  const [related, setRelated] = useState<Record<string, RelatedEntity[] | 'loading' | { error: string }>>({})
+  const [reader, setReader] = useState<ReaderTab | null>(null)
+  const [booting, setBooting] = useState(true)
+  const [sprintStatus, setSprintStatus] = useState<BootStepState>('pending')
+  const [deadlinesStatus, setDeadlinesStatus] = useState<BootStepState>('pending')
+
+  const changeDeveloper = (email: string) => {
+    try { localStorage.setItem(DEVELOPER_STORAGE_KEY, email) } catch { /* storage unavailable */ }
+    const bridgeSources = new Set(BRIDGE_QUEUES.map(q => q.source))
+    setTasks(prev => prev.filter(t => !bridgeSources.has(t.source)))
+    setBridgeLoading(true)
+    setBrief(null)
+    setActionError(null)
+    setSprintStatus('pending')
+    setDeadlinesStatus('pending')
+    setBooting(true)
+    setDeveloper(email)
+  }
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(t)
   }, [])
 
+  // Queues: rebuilt from the bridge on every refresh, with each item placed in
+  // its saved lane (claimed Pulse items default to Todo).
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      const currentSprint = await fetchCurrentSprint().catch(() => null)
+      if (cancelled) return
+      setSprint(currentSprint)
+      setSprintStatus(currentSprint ? 'ok' : 'fail')
+
+      const results = await Promise.allSettled(BRIDGE_QUEUES.map(q => fetchQueue(q.slug, developer)))
+      if (cancelled) return
+
+      const errors: Partial<Record<QueueSource, string>> = {}
+      BRIDGE_QUEUES.forEach((q, i) => {
+        const r = results[i]
+        if (r.status === 'rejected') errors[q.source] = r.reason instanceof Error ? r.reason.message : String(r.reason)
+      })
+      const lanes = loadLanes(developer)
+      setTasks(prev => {
+        let next = prev
+        BRIDGE_QUEUES.forEach((q, i) => {
+          const r = results[i]
+          if (r.status === 'rejected') return
+          const claimedIds = new Set(r.value.claimed.map(item => item.id))
+          const seen = new Set<string>()
+          const fresh = [...r.value.items, ...r.value.claimed]
+            .filter(item => !seen.has(item.id) && seen.add(item.id))
+            .map(item => ({
+              ...q.toTask(item, currentSprint?.number ?? null),
+              status: lanes[item.id] ?? (claimedIds.has(item.id) ? 'today' : 'queue'),
+            }))
+          next = [...next.filter(t => t.source !== q.source), ...fresh]
+        })
+        return next
+      })
+      setBridgeErrors(errors)
+      setBridgeLoading(false)
+    }
+    load()
+    const t = setInterval(load, BRIDGE_REFRESH_MS)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [developer])
+
+  // Standup brief + deadlines change at most daily; poll every 5 minutes so a
+  // newly generated brief shows up without a reload.
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      const [b, d] = await Promise.allSettled([fetchStandup(developer), fetchDeadlines()])
+      if (cancelled) return
+      setBrief(b.status === 'fulfilled' ? b.value : { error: b.reason instanceof Error ? b.reason.message : String(b.reason) })
+      if (d.status === 'fulfilled') setDeadlines(d.value)
+      setDeadlinesStatus(d.status === 'fulfilled' ? 'ok' : 'fail')
+    }
+    load()
+    const t = setInterval(load, CONTEXT_REFRESH_MS)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [developer])
+
+  const workingTask = tasks.find(t => t.status === 'working') ?? null
+
+  // Related Initiative / Issue / Analyst Issue for the active item.
+  useEffect(() => {
+    if (!workingTask?.queue || related[workingTask.id]) return
+    const { id, queue } = workingTask
+    setRelated(prev => ({ ...prev, [id]: 'loading' }))
+    fetchRelated(id, queue)
+      .then(r => setRelated(prev => ({ ...prev, [id]: r })))
+      .catch(e => setRelated(prev => ({ ...prev, [id]: { error: e instanceof Error ? e.message : String(e) } })))
+  }, [workingTask, related])
+
+  // Move a card between lanes. Only one item can be in Working; the previous
+  // one drops back to Todo. Claimable queues claim on leaving the queue and
+  // release on returning to it; a failed write puts the card back.
+  const moveTask = async (id: string, to: Status) => {
+    const task = tasks.find(t => t.id === id)
+    if (!task || task.status === to) return
+    const from = task.status
+    const displaced = to === 'working' ? tasks.find(t => t.status === 'working' && t.id !== id) : undefined
+
+    const setLane = (lane: Status, displacedLane?: Status) => {
+      setTasks(prev => prev.map(t =>
+        t.id === id ? { ...t, status: lane } : displaced && t.id === displaced.id && displacedLane ? { ...t, status: displacedLane } : t))
+      updateLanes(developer, { [id]: lane, ...(displaced && displacedLane ? { [displaced.id]: displacedLane } : {}) })
+    }
+    setLane(to, 'today')
+    setActionError(null)
+
+    const q = bridgeQueueFor(task)
+    if (!q?.claimable) return
+    const action = from === 'queue' && to !== 'queue' ? 'claim' : from !== 'queue' && to === 'queue' ? 'release' : null
+    if (!action) return
+    try {
+      await (action === 'claim' ? claimItem : releaseItem)(id, q.slug, developer)
+    } catch (e) {
+      setLane(from, 'working')
+      setActionError(`Couldn't ${action} ${task.ref ?? task.title}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const markDone = async (task: Task) => {
+    const q = bridgeQueueFor(task)
+    if (!q?.doneable) return
+    setActionError(null)
+    try {
+      await markItemDone(task.id, q.slug, developer)
+      setTasks(prev => prev.filter(t => t.id !== task.id))
+      updateLanes(developer, { [task.id]: 'queue' })
+      setModalTask(m => (m?.id === task.id ? null : m))
+    } catch (e) {
+      setActionError(`Couldn't mark ${task.ref ?? task.title} done: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  const doneHandler = (task: Task) => (bridgeQueueFor(task)?.doneable ? () => markDone(task) : undefined)
+
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
     e.dataTransfer.effectAllowed = 'move'
     setDragId(id)
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent, zone: 'today' | 'working' | 'blocked' | 'queue') => {
+  const handleDrop = (e: React.DragEvent, zone: Status) => {
     e.preventDefault()
     setDropTarget(null)
-    if (!dragId) return
-    if (zone === 'queue') {
-      setTasks(prev => prev.map(t => t.id === dragId ? { ...t, status: 'queue' } : t))
-      if (workingId === dragId) setWorkingId(null)
-    } else {
-      setTasks(prev => prev.map(t => t.id === dragId ? { ...t, status: zone } : t))
-      if (zone === 'working') setWorkingId(dragId)
-      else if (workingId === dragId) setWorkingId(null)
-    }
+    if (dragId) moveTask(dragId, zone)
     setDragId(null)
-  }, [dragId, workingId])
+  }
 
   const handleDragOver = useCallback((e: React.DragEvent, zone: 'today' | 'working' | 'blocked' | 'queue') => {
     e.preventDefault()
@@ -791,13 +899,79 @@ export default function App() {
   const queueTasks = tasks.filter(t => t.status === 'queue' && t.source === queueTab)
   const todayTasks = tasks.filter(t => t.status === 'today')
   const blockedTasks = tasks.filter(t => t.status === 'blocked')
-  const workingTask = workingId ? tasks.find(t => t.id === workingId) ?? null : null
 
   const allQueueTasks = tasks.filter(t => t.status === 'queue')
   const sprintProgress = 28
 
+  const today = localIsoDate(time)
   const timeStr = time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  const dateStr = `${shortDate(today)} · ${time.getFullYear()}`
   const activeSrc = SOURCE_TABS.find(s => s.id === queueTab)!
+  const sprintHeader = sprint ? [sprint.name.toUpperCase(), formatSprintRange(sprint)].filter(Boolean).join(' · ') : 'SPRINT —'
+  const sprintDaysLeft = sprint?.end ? Math.max(0, daysBetween(today, sprint.end)) : null
+
+  const briefData = brief && !('error' in brief) ? brief : null
+  const tickerItems = [
+    ...(briefData?.teamItems ?? []).map(l => ({ src: 'TEAM', text: l.text })),
+    ...deadlines
+      .map(d => deadlineTickerText(d, today, DEADLINE_TICKER_DAYS))
+      .filter((t): t is string => t !== null)
+      .map(text => ({ src: 'DATE', text })),
+  ]
+  const calendarEnd = sprint?.end ? addDays(sprint.end, CALENDAR_LOOKAHEAD_DAYS) : addDays(today, CALENDAR_LOOKAHEAD_DAYS)
+  const calendarItems = deadlines
+    .filter(d => (d.end ?? d.start) >= today && d.start <= calendarEnd)
+    .sort((a, b) => a.start.localeCompare(b.start))
+  const queuesFailed = BRIDGE_QUEUES.every(q => bridgeErrors[q.source])
+  const queuesStatus: BootStepState = bridgeLoading ? 'pending' : queuesFailed ? 'fail' : 'ok'
+  const briefStatus: BootStepState = !brief ? 'pending' : 'error' in brief ? 'fail' : 'ok'
+  const bootSteps: BootStep[] = [
+    { label: 'establishing uplink to notion-bridge', state: sprintStatus === 'pending' ? 'pending' : sprintStatus === 'ok' || queuesStatus === 'ok' ? 'ok' : 'fail' },
+    { label: 'syncing current sprint', state: sprintStatus },
+    { label: 'loading queues · tasks / pulse / solarwinds', state: queuesStatus },
+    { label: 'compiling daily brief', state: briefStatus },
+    { label: 'plotting deadlines & milestones', state: deadlinesStatus },
+  ]
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  const countOf = (source: QueueSource) => tasks.filter(t => t.source === source).length
+  const bootSummary = [
+    briefData?.mode === 'brief' && plural(briefData.responsibilities.length, 'responsibility', 'responsibilities') + ' today',
+    briefData?.mode === 'brief' && briefData.aging.length > 0 && `${briefData.aging.length} aging`,
+    briefData?.mode === 'leadership' && plural(briefData.summaries.length, 'developer update', 'developer updates'),
+    plural(countOf('tasks'), 'task', 'tasks'),
+    `${countOf('pulse')} pulse`,
+    plural(countOf('solarwinds'), 'ticket', 'tickets'),
+  ].filter(Boolean).join(' · ')
+  const currentDeveloper = TEST_DEVELOPERS.find(d => d.email === developer)
+  const openMention = (line: BriefLine) => {
+    const task = tasks.find(t => line.mentions.includes(t.id))
+    if (task) {
+      setReader(null)
+      setModalTask(task)
+    }
+  }
+
+  // Scroll the ticker at a constant, readable speed regardless of how much
+  // content it holds (the track is two copies, so one loop is half its width).
+  const tickerRef = useRef<HTMLDivElement>(null)
+  const [tickerDuration, setTickerDuration] = useState(60)
+  const tickerKey = tickerItems.map(t => t.text).join('|')
+  useLayoutEffect(() => {
+    const width = tickerRef.current?.scrollWidth ?? 0
+    if (width) setTickerDuration(Math.max(20, width / 2 / TICKER_PX_PER_SEC))
+  }, [tickerKey])
+
+  const briefView = <BriefPanel brief={brief} tasks={tasks} onOpen={openMention} today={today} />
+  const calendarView = (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+      <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>{sprintHeader}</span>
+        {sprintDaysLeft !== null && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff' }}>{sprintDaysLeft} DAYS LEFT</span>}
+      </div>
+      <CalendarList items={calendarItems} sprint={sprint} today={today} />
+    </div>
+  )
+  const tickerView = <TickerList items={tickerItems} />
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#060b14', overflow: 'hidden', fontFamily: 'Inter, sans-serif' }}>
@@ -808,16 +982,16 @@ export default function App() {
           <div style={{ width: 28, height: 28, background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.4)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'JetBrains Mono', fontSize: 13, color: '#00d4ff', fontWeight: 700 }}>◈</div>
           <div>
             <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: '#e0f0ff' }}>DEV COMMAND CENTER</div>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', letterSpacing: '0.08em' }}>SPRINT 42 · SEP 15 – OCT 3</div>
+            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', letterSpacing: '0.08em' }}>{sprintHeader}</div>
           </div>
         </div>
 
         {/* Ticker */}
-        <div style={{ flex: 1, overflow: 'hidden', margin: '0 12px', position: 'relative' }}>
+        <div className="ticker-wrap" onClick={() => setReader('ticker')} title="Click to read all team items and dates" style={{ flex: 1, overflow: 'hidden', margin: '0 12px', position: 'relative', cursor: 'zoom-in' }}>
           <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(90deg, rgba(6,11,20,1), transparent)', zIndex: 1, pointerEvents: 'none' }} />
           <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(270deg, rgba(6,11,20,1), transparent)', zIndex: 1, pointerEvents: 'none' }} />
-          <div className="ticker-track" style={{ display: 'inline-flex', gap: 28, alignItems: 'center' }}>
-            {[...TICKER_ITEMS, ...TICKER_ITEMS].map((b, i) => (
+          <div ref={tickerRef} className="ticker-track" style={{ display: 'inline-flex', gap: 28, alignItems: 'center', animationDuration: `${tickerDuration}s` }}>
+            {(tickerItems.length ? [...tickerItems, ...tickerItems] : [{ src: 'TEAM', text: 'No team items' }]).map((b, i) => (
               <span key={i} style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#9bbdd4', whiteSpace: 'nowrap', letterSpacing: '0.04em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ color: '#00d4ff', fontSize: 9 }}>◆</span>
                 <span style={{ color: '#4a8ca8', fontSize: 8, background: 'rgba(0,212,255,0.08)', padding: '0 4px', borderRadius: 2 }}>{b.src}</span>
@@ -827,6 +1001,16 @@ export default function App() {
           </div>
         </div>
 
+        {/* TEMP: developer switcher for testing */}
+        <select
+          value={developer}
+          onChange={e => changeDeveloper(e.target.value)}
+          title="Viewing as developer (testing only)"
+          style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#ffaa00', background: 'rgba(255,170,0,0.08)', border: '1px dashed rgba(255,170,0,0.4)', borderRadius: 3, padding: '3px 6px', flexShrink: 0, cursor: 'pointer' }}
+        >
+          {TEST_DEVELOPERS.map(d => <option key={d.email} value={d.email} style={{ background: '#060b14' }}>{d.name}</option>)}
+        </select>
+
         {/* Stats */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexShrink: 0 }}>
           <Stat label="SPRINT" value={`${sprintProgress}%`} color="#00d4ff" />
@@ -835,7 +1019,7 @@ export default function App() {
           <div style={{ width: 1, height: 20, background: 'rgba(0,212,255,0.12)' }} />
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: 'JetBrains Mono', fontSize: 13, color: '#00d4ff', fontWeight: 700 }}>{timeStr}</div>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>SEP 22 · 2026</div>
+            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>{dateStr}</div>
           </div>
         </div>
       </header>
@@ -870,11 +1054,23 @@ export default function App() {
 
           {/* Queue list */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-            {queueTasks.length === 0 ? (
+            {actionError && (
+              <div onClick={() => setActionError(null)} title="Dismiss" style={{ marginBottom: 6, padding: '6px 8px', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680', background: 'rgba(255,51,85,0.08)', border: '1px solid rgba(255,51,85,0.25)', borderRadius: 2, cursor: 'pointer' }}>
+                {actionError} ✕
+              </div>
+            )}
+            {bridgeErrors[queueTab] && (
+              <div style={{ marginBottom: 6, padding: '6px 8px', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680', background: 'rgba(255,51,85,0.08)', border: '1px solid rgba(255,51,85,0.25)', borderRadius: 2 }}>
+                BRIDGE ERROR · {bridgeErrors[queueTab]}
+              </div>
+            )}
+            {bridgeLoading && BRIDGE_QUEUES.some(q => q.source === queueTab) && queueTasks.length === 0 ? (
+              <div style={{ padding: '20px 8px', textAlign: 'center', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>LOADING…</div>
+            ) : queueTasks.length === 0 ? (
               <div style={{ padding: '20px 8px', textAlign: 'center', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.5 }}>NO ITEMS IN QUEUE</div>
             ) : (
               queueTasks.map(t => (
-                <TaskCard key={t.id} task={t} onDragStart={handleDragStart} onClick={() => setModalTask(t)} />
+                <TaskCard key={t.id} task={t} onDragStart={handleDragStart} onClick={() => setModalTask(t)} onDone={doneHandler(t)} />
               ))
             )}
           </div>
@@ -896,36 +1092,12 @@ export default function App() {
                     {tab === 'brief' ? '◉ DAILY BRIEF' : '◈ SPRINT CALENDAR'}
                   </button>
                 ))}
+                <button onClick={() => setReader(centerTab)} title="Expand" style={{ fontFamily: 'JetBrains Mono', fontSize: 11, padding: '0 10px', border: 'none', borderLeft: '1px solid rgba(0,212,255,0.1)', background: 'transparent', color: '#4a6a84', cursor: 'pointer' }}>⤢</button>
               </div>
 
-              {centerTab === 'brief' ? (
-                <div style={{ flex: 1, overflowY: 'auto', padding: '5px 10px' }}>
-                  {TICKER_ITEMS.map((item, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 7, alignItems: 'flex-start', padding: '4px 0', borderBottom: i < TICKER_ITEMS.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                      <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a8ca8', background: 'rgba(0,212,255,0.06)', padding: '0 4px', borderRadius: 2, flexShrink: 0, marginTop: 2 }}>{item.src}</span>
-                      <span style={{ fontSize: 10 }}>{item.icon}</span>
-                      <span style={{ fontSize: 11, color: '#c8dff0', lineHeight: 1.4 }}>{item.text}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
-                  <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>SPRINT 42 · SEP 15 – OCT 3</span>
-                    <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff' }}>14 DAYS LEFT</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                    {SPRINT_DAYS.map((day, i) => (
-                      <div key={i} style={{ width: 28, textAlign: 'center' }}>
-                        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 7, color: '#4a6a84', marginBottom: 2 }}>{day.label}</div>
-                        <div style={{ height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 2, border: `1px solid ${day.type === 'today' ? '#00d4ff' : day.type === 'meeting' ? 'rgba(168,85,247,0.4)' : day.type === 'start' || day.type === 'end' ? 'rgba(0,255,136,0.3)' : 'rgba(255,255,255,0.06)'}`, background: day.type === 'today' ? 'rgba(0,212,255,0.14)' : day.type === 'meeting' ? 'rgba(168,85,247,0.07)' : 'transparent' }}>
-                          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, fontWeight: day.type === 'today' ? 700 : 400, color: day.type === 'today' ? '#00d4ff' : day.type === 'meeting' ? '#a855f7' : day.type === 'start' || day.type === 'end' ? '#00ff88' : '#7aa0c0' }}>{day.d}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <div onClick={() => setReader(centerTab)} title="Click to expand" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', cursor: 'zoom-in' }}>
+                {centerTab === 'brief' ? briefView : calendarView}
+              </div>
             </div>
 
             {/* Sprint metrics */}
@@ -949,18 +1121,15 @@ export default function App() {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.15em', color: '#00d4ff', fontWeight: 700 }}>◈ WORKING SPACE</span>
-              {workingTask && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>— {workingTask.id}</span>}
+              {workingTask && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>— {workingTask.ref ?? workingTask.id}</span>}
               <span style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono', fontSize: 8, color: dropTarget === 'working' ? '#00d4ff' : '#4a6a84' }}>DROP ITEM TO ACTIVATE</span>
             </div>
             <WorkingSpace
-              task={workingTask ?? null}
+              task={workingTask}
+              related={workingTask ? related[workingTask.id] : undefined}
               onDragStart={handleDragStart}
-              onClear={() => {
-                if (workingId) {
-                  setTasks(prev => prev.map(t => t.id === workingId ? { ...t, status: 'queue' } : t))
-                  setWorkingId(null)
-                }
-              }}
+              onDone={workingTask ? doneHandler(workingTask) : undefined}
+              onClear={() => { if (workingTask) moveTask(workingTask.id, 'queue') }}
             />
           </div>
         </div>
@@ -983,7 +1152,7 @@ export default function App() {
             <div style={{ flex: 1, overflowY: 'auto', padding: 5 }}>
               {todayTasks.length === 0
                 ? <EmptyDrop label="DROP TASKS HERE" />
-                : todayTasks.map(t => <TaskCard key={t.id} task={t} onDragStart={handleDragStart} compact onClick={() => setModalTask(t)} />)
+                : todayTasks.map(t => <TaskCard key={t.id} task={t} onDragStart={handleDragStart} compact onClick={() => setModalTask(t)} onDone={doneHandler(t)} />)
               }
             </div>
           </div>
@@ -1004,7 +1173,7 @@ export default function App() {
             <div style={{ flex: 1, overflowY: 'auto', padding: 5 }}>
               {blockedTasks.length === 0
                 ? <EmptyDrop label="NO BLOCKERS" color="#ff3355" />
-                : blockedTasks.map(t => <TaskCard key={t.id} task={t} onDragStart={handleDragStart} compact onClick={() => setModalTask(t)} />)
+                : blockedTasks.map(t => <TaskCard key={t.id} task={t} onDragStart={handleDragStart} compact onClick={() => setModalTask(t)} onDone={doneHandler(t)} />)
               }
             </div>
           </div>
@@ -1013,7 +1182,211 @@ export default function App() {
 
       {/* ── Detail Modal ── */}
       {modalTask && <DetailModal task={modalTask} onClose={() => setModalTask(null)} />}
+
+      {reader && (
+        <ReaderModal
+          tab={reader}
+          onTab={setReader}
+          onClose={() => setReader(null)}
+          views={{ brief: briefView, ticker: tickerView, calendar: calendarView }}
+        />
+      )}
+
+      {booting && (
+        <BootScreen
+          key={developer}
+          login={developer.split('@')[0]}
+          firstName={(currentDeveloper?.name ?? developer).split(/\s+/)[0]}
+          sprintNumber={sprint?.number ?? null}
+          steps={bootSteps}
+          summary={bootSummary}
+          onDone={() => setBooting(false)}
+        />
+      )}
     </div>
+  )
+}
+
+// ─── Daily Brief ──────────────────────────────────────────────────────────────
+
+const monoLabel: React.CSSProperties = { fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.12em', color: '#4a6a84' }
+
+function BriefPanel({ brief, tasks, onOpen, today }: {
+  brief: StandupBrief | { error: string } | null
+  tasks: Task[]
+  onOpen: (line: BriefLine) => void
+  today: string
+}) {
+  const shell = (children: React.ReactNode) => <div style={{ flex: 1, overflowY: 'auto', padding: '6px 10px' }}>{children}</div>
+  if (!brief) return shell(<span style={monoLabel}>LOADING BRIEF…</span>)
+  if ('error' in brief) return shell(<span style={{ ...monoLabel, color: '#ff6680' }}>BRIDGE ERROR · {brief.error}</span>)
+  if (brief.mode === 'none' || !brief.date) return shell(<span style={monoLabel}>NO STANDUP BRIEF YET THIS SPRINT</span>)
+
+  const heading = `${shortDate(brief.date)} STANDUP · ${brief.mode === 'brief' ? 'MORNING BRIEF' : 'LEADERSHIP SUMMARY'}`
+  const Line = ({ line, index, color }: { line: BriefLine; index?: number; color: string }) => {
+    const task = tasks.find(t => line.mentions.includes(t.id))
+    return (
+      <div
+        onClick={task ? e => { e.stopPropagation(); onOpen(line) } : undefined}
+        style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: task ? 'pointer' : 'default' }}
+      >
+        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color, flexShrink: 0, marginTop: 2, minWidth: 10 }}>{index !== undefined ? `${index + 1}.` : '•'}</span>
+        <span style={{ fontSize: 10.5, color: '#c8dff0', lineHeight: 1.4 }}>
+          {line.text}
+          {task && <span style={{ marginLeft: 5, fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff' }}>{task.ref ?? ''} ↗</span>}
+        </span>
+      </div>
+    )
+  }
+
+  return shell(
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ ...monoLabel, color: '#00d4ff' }}>{heading}</span>
+        {!brief.isToday && brief.date < today && <span style={{ ...monoLabel, color: '#ffaa00', marginLeft: 'auto' }}>TODAY'S NOT POSTED YET</span>}
+      </div>
+      {brief.mode === 'brief' ? (
+        <>
+          <div style={{ ...monoLabel, marginTop: 4 }}>YOUR RESPONSIBILITIES TODAY</div>
+          {brief.responsibilities.length === 0
+            ? <div style={{ fontSize: 10, color: '#4a6a84', padding: '3px 0' }}>None listed</div>
+            : brief.responsibilities.map((l, i) => <Line key={i} line={l} index={i} color="#00d4ff" />)}
+          {brief.aging.length > 0 && (
+            <>
+              <div style={{ ...monoLabel, marginTop: 6, color: '#ffaa00' }}>AGING ITEMS</div>
+              {brief.aging.map((l, i) => <Line key={i} line={l} color="#ffaa00" />)}
+            </>
+          )}
+        </>
+      ) : (
+        brief.summaries.map(s => (
+          <div key={s.developer} style={{ display: 'flex', gap: 7, alignItems: 'flex-start', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', background: 'rgba(0,212,255,0.08)', padding: '1px 5px', borderRadius: 2, flexShrink: 0, marginTop: 1 }}>{s.developer.toUpperCase()}</span>
+            <span style={{ fontSize: 10.5, color: '#c8dff0', lineHeight: 1.4 }}>{s.text}</span>
+          </div>
+        ))
+      )}
+    </>,
+  )
+}
+
+// ─── Reader (expanded brief / ticker / calendar) ──────────────────────────────
+
+type ReaderTab = 'brief' | 'ticker' | 'calendar'
+const TICKER_PX_PER_SEC = 35
+const READER_TABS: { id: ReaderTab; label: string }[] = [
+  { id: 'brief', label: '◉ DAILY BRIEF' },
+  { id: 'ticker', label: '◆ TEAM ITEMS & DATES' },
+  { id: 'calendar', label: '◈ SPRINT CALENDAR' },
+]
+
+function TickerList({ items }: { items: { src: string; text: string }[] }) {
+  const groups = [
+    { src: 'TEAM', label: 'TEAM ITEMS' },
+    { src: 'DATE', label: `DEADLINES IN THE NEXT ${DEADLINE_TICKER_DAYS} DAYS` },
+  ]
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+      {groups.map(g => {
+        const rows = items.filter(i => i.src === g.src)
+        return (
+          <div key={g.src} style={{ marginBottom: 10 }}>
+            <div style={{ ...monoLabel, marginBottom: 3 }}>{g.label}</div>
+            {rows.length === 0
+              ? <div style={{ fontSize: 10.5, color: '#4a6a84', padding: '3px 0' }}>None</div>
+              : rows.map((r, i) => (
+                <div key={i} style={{ display: 'flex', gap: 6, padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', flexShrink: 0, marginTop: 2 }}>•</span>
+                  <span style={{ fontSize: 10.5, color: '#c8dff0', lineHeight: 1.4 }}>{r.text}</span>
+                </div>
+              ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Full-screen dimmed overlay with a centered HUD panel; Esc or a click
+// outside closes it.
+function Overlay({ onClose, className, children }: { onClose: () => void; className?: string; children: React.ReactNode }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
+      <div onClick={e => e.stopPropagation()} className={`panel hud-corner ${className ?? ''}`} style={{ width: 760, maxWidth: 'calc(100vw - 32px)', height: '80vh', display: 'flex', flexDirection: 'column', borderColor: 'rgba(0,212,255,0.35)', boxShadow: '0 0 60px rgba(0,212,255,0.12), 0 0 120px rgba(0,0,0,0.8)' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function ReaderModal({ tab, onTab, onClose, views }: {
+  tab: ReaderTab
+  onTab: (tab: ReaderTab) => void
+  onClose: () => void
+  views: Record<ReaderTab, React.ReactNode>
+}) {
+  return (
+    <Overlay onClose={onClose} className="reader">
+        <div style={{ display: 'flex', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(0,212,255,0.04)', flexShrink: 0 }}>
+          {READER_TABS.map(t => (
+            <button key={t.id} onClick={() => onTab(t.id)} style={{ flex: 1, fontFamily: 'JetBrains Mono', fontSize: 10, letterSpacing: '0.12em', padding: '10px', border: 'none', background: tab === t.id ? 'rgba(0,212,255,0.08)' : 'transparent', color: tab === t.id ? '#00d4ff' : '#4a6a84', cursor: 'pointer', borderBottom: tab === t.id ? '2px solid #00d4ff' : '2px solid transparent' }}>
+              {t.label}
+            </button>
+          ))}
+          <button onClick={onClose} title="Close (Esc)" style={{ fontFamily: 'JetBrains Mono', fontSize: 12, padding: '0 14px', border: 'none', borderLeft: '1px solid rgba(0,212,255,0.1)', background: 'transparent', color: '#4a6a84', cursor: 'pointer' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '6px 10px', zoom: 1.35 }}>
+          {views[tab]}
+        </div>
+    </Overlay>
+  )
+}
+
+// ─── Sprint Calendar ──────────────────────────────────────────────────────────
+
+function CalendarList({ items, sprint, today }: { items: Deadline[]; sprint: Sprint | null; today: string }) {
+  if (items.length === 0) return <span style={monoLabel}>NO UPCOMING DEADLINES</span>
+
+  const inSprint = (d: Deadline) => !!sprint?.end && d.start <= sprint.end
+  const range = (d: Deadline) => (d.end && d.end !== d.start ? `${shortDate(d.start)} – ${shortDate(d.end)}` : shortDate(d.start))
+  const sprintLen = sprint?.start && sprint.end ? daysBetween(sprint.start, sprint.end) + 1 : 0
+  const pct = (iso: string) => sprint?.start && sprintLen ? Math.min(100, Math.max(0, (daysBetween(sprint.start, iso) / sprintLen) * 100)) : 0
+
+  const Row = ({ d }: { d: Deadline }) => {
+    const active = d.start <= today
+    return (
+      <div style={{ padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+          <span style={{ fontSize: 10.5, color: active ? '#e0f0ff' : '#c8dff0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
+          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: active ? '#00ff88' : '#7aa0c0', flexShrink: 0 }}>
+            {range(d)}{!active && ` · ${daysBetween(today, d.start)}d`}
+          </span>
+        </div>
+        {inSprint(d) && sprintLen > 0 && (
+          <div style={{ position: 'relative', height: 3, background: 'rgba(255,255,255,0.05)', borderRadius: 2, marginTop: 2 }}>
+            <div style={{ position: 'absolute', left: `${pct(today)}%`, top: -2, width: 1, height: 7, background: '#00d4ff' }} />
+            <div style={{ position: 'absolute', left: `${pct(d.start)}%`, width: `${Math.max(2, pct(addDays(d.end ?? d.start, 1)) - pct(d.start))}%`, height: 3, borderRadius: 2, background: active ? '#00ff88' : '#a855f7' }} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const current = items.filter(inSprint)
+  const upcoming = items.filter(d => !inSprint(d))
+  return (
+    <>
+      {current.length > 0 && <div style={{ ...monoLabel, marginBottom: 2 }}>THIS SPRINT</div>}
+      {current.map(d => <Row key={d.id} d={d} />)}
+      {upcoming.length > 0 && <div style={{ ...monoLabel, marginTop: 6, marginBottom: 2 }}>UPCOMING</div>}
+      {upcoming.map(d => <Row key={d.id} d={d} />)}
+    </>
   )
 }
 

@@ -183,6 +183,7 @@ body {
   animation: ticker 30s linear infinite;
   white-space: nowrap;
 }
+.ticker-wrap:hover .ticker-track { animation-play-state: paused; }
 
 /* Pulse animation */
 @keyframes pulse-dot {

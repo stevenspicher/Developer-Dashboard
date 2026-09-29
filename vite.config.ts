@@ -34,6 +34,13 @@ react(),
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
       port: parseInt(process.env.PORT || '8443'),
       strictPort: true,
+      proxy: {
+        '/bridge': {
+          target: process.env.NOTION_BRIDGE_URL || 'http://localhost:3100',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/bridge/, ''),
+        },
+      },
       watch: {
         ignored: [
           '**/.figma/**',
