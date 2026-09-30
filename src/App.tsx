@@ -11,74 +11,6 @@ import type { BriefLine, Deadline, RelatedEntity, Sprint, StandupBrief } from '.
 import BootScreen from './BootScreen'
 import type { BootStep, BootStepState } from './BootScreen'
 
-// ─── Mock Initiatives ─────────────────────────────────────────────────────────
-
-const INITIATIVES: Record<string, Initiative> = {
-  'INIT-07': { id: 'INIT-07', name: 'Platform Security Hardening', goal: 'Achieve SOC2 Type II compliance and eliminate all critical CVEs before Q4 audit.', owner: 'JR', progress: 44, dueDate: 'Oct 31', status: 'at-risk' },
-  'INIT-05': { id: 'INIT-05', name: 'Developer Experience 2.0', goal: 'Reduce local dev setup time to <5 min and cut CI build time by 50%.', owner: 'AR', progress: 62, dueDate: 'Nov 15', status: 'on-track' },
-  'INIT-09': { id: 'INIT-09', name: 'Customer Portal Rebuild', goal: 'Migrate 100% of portal features to new React stack with improved accessibility.', owner: 'MK', progress: 28, dueDate: 'Dec 1', status: 'on-track' },
-  'INIT-03': { id: 'INIT-03', name: 'Observability & SRE Foundations', goal: 'Full distributed tracing, structured logging, and 99.9% uptime SLA by year end.', owner: 'AR', progress: 15, dueDate: 'Dec 31', status: 'at-risk' },
-}
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const INITIAL_TASKS: Task[] = [
-  // Zendesk
-  {
-    id: 'ZD-8841', type: 'ticket', source: 'zendesk', title: 'Export fails > 10k rows · Acme Corp',
-    description: 'Enterprise customer Acme Corp (ARR $240k) unable to export dashboard data beyond 10k rows. Request times out at 30s. Linked to US-1038.',
-    priority: 'high', progress: 0, assignee: 'MK',
-    tags: ['export', 'enterprise', 'timeout'], status: 'queue', comments: 8,
-    reportedBy: 'Acme Corp · Sarah Chen',
-    affectedSystem: 'Dashboard Export · /api/export',
-    activity: [{ user: 'MK', time: '08:45', text: 'Confirmed server-side timeout. Linked US-1038.' }, { user: 'ZD', time: '07:00', text: 'Ticket escalated to P1 by customer' }],
-  },
-  {
-    id: 'ZD-8836', type: 'bug', source: 'zendesk', title: 'OAuth login broken on Safari 17.x',
-    description: 'Safari 17.x (iOS 17.1+) users cannot complete OAuth login flow. Redirect loop after consent. 23 confirmed affected users, likely hundreds more.',
-    priority: 'critical', progress: 0, assignee: 'MK',
-    tags: ['oauth', 'safari', 'ios'], status: 'queue', comments: 14,
-    reportedBy: '23 users · Safari 17.x',
-    affectedSystem: 'OAuth callback · /auth/callback',
-  },
-  {
-    id: 'ZD-8830', type: 'ticket', source: 'zendesk', title: 'Webhook delivery failing 12h window',
-    description: 'NovaStar Inc webhooks not delivered for a 12-hour window Sep 21 08:00–20:00 UTC. Retry queue silently dropped events. Root cause unknown.',
-    priority: 'high', progress: 0, assignee: 'AR',
-    tags: ['webhook', 'reliability', 'data-loss'], status: 'queue', comments: 6,
-    reportedBy: 'NovaStar Inc · Dev Team',
-    affectedSystem: 'Webhook delivery service',
-  },
-
-  // ADS (Azure DevOps)
-  {
-    id: 'ADS-1104', type: 'alert', source: 'ads', title: 'Infra drift · prod cluster',
-    description: 'Terraform plan shows 3 unexpected resource changes in prod cluster. Likely manual console changes. Drift must be reconciled before next deployment.',
-    priority: 'high', progress: 0, assignee: 'AR',
-    tags: ['terraform', 'infra', 'drift'], status: 'queue', comments: 2,
-    affectedSystem: 'prod-cluster · terraform state',
-    environment: 'Production',
-    initiative: INITIATIVES['INIT-03'],
-  },
-  {
-    id: 'ADS-1101', type: 'bug', source: 'ads', title: 'E2E suite failing on main · 4 tests',
-    description: 'Checkout flow E2E tests failing since PR #1198 merged. Tests: checkout_guest, checkout_coupon, order_confirm_email, order_cancel. Blocking deploys.',
-    priority: 'critical', progress: 0, assignee: 'MK',
-    tags: ['e2e', 'ci', 'checkout'], status: 'queue', comments: 9,
-    affectedSystem: 'main branch · Playwright suite',
-    initiative: INITIATIVES['INIT-05'],
-    activity: [{ user: 'ADS', time: '06:30', text: 'Pipeline blocked on 4 failing E2E tests' }, { user: 'MK', time: '09:00', text: 'Investigating — suspect env variable change' }],
-  },
-  {
-    id: 'ADS-1098', type: 'task', source: 'ads', title: 'Dependabot: lodash security patch',
-    description: 'lodash 4.17.20 → 4.17.21 (CVE-2021-23337 fix). Auto-merge blocked due to custom lodash plugin. Manual review and merge required.',
-    priority: 'medium', progress: 0, assignee: 'JR',
-    tags: ['security', 'dependency', 'cve'], status: 'queue', comments: 1,
-    affectedSystem: 'package.json · 3 packages',
-    initiative: INITIATIVES['INIT-07'],
-  },
-]
-
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const PRIORITY_CONFIG = {
@@ -106,7 +38,10 @@ const SOURCE_TABS = ([
   { id: 'solarwinds', label: 'Solarwinds', color: '#ffaa00' },
   { id: 'zendesk',    label: 'Zendesk',    color: '#f97316' },
   { id: 'ads',        label: 'ADS',        color: '#60a5fa' },
-] satisfies { id: QueueSource; label: string; color: string }[]).filter(tab => tab.id !== 'stories' || ADO_STORIES_ENABLED)
+] satisfies { id: QueueSource; label: string; color: string }[])
+  // Only sources with a live queue: Zendesk and ADS have none yet, and Stories
+  // is off while ado-bridge serves mock data.
+  .filter(tab => QUEUES.some(q => q.source === tab.id))
 
 const ASSIGNEE_COLORS: Record<string, string> = {
   JR: '#00d4ff', MK: '#a855f7', AR: '#00ff88',
@@ -692,7 +627,7 @@ function ContextField({ label, value, color = '#c8dff0' }: { label: string; valu
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS)
+  const [tasks, setTasks] = useState<Task[]>([])
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<'today' | 'working' | 'blocked' | 'queue' | null>(null)
   const [centerTab, setCenterTab] = useState<'brief' | 'calendar'>('brief')
@@ -1077,9 +1012,7 @@ export default function App() {
               <SprintMetric label="BURNDOWN" value={`${sprintProgress}%`} progress={sprintProgress} color="#00d4ff" />
               {ADO_STORIES_ENABLED && <SprintMetric label="STORIES" value={`0/${tasks.filter(t => t.source === 'stories').length}`} progress={0} color="#a855f7" />}
               <SprintMetric label="TASKS" value={`0/${tasks.filter(t => t.source === 'tasks').length}`} progress={0} color="#00ff88" />
-              <SprintMetric label="OPEN ALERTS" value={`${tasks.filter(t => ['pulse', 'solarwinds', 'ads'].includes(t.source) && t.status === 'queue').length}`} progress={0} color="#ff3355" />
-              <SprintMetric label="TICKETS" value={`${tasks.filter(t => t.source === 'zendesk' && t.status === 'queue').length}`} progress={0} color="#f97316" />
-            </div>
+              <SprintMetric label="OPEN ALERTS" value={`${tasks.filter(t => ['pulse', 'solarwinds'].includes(t.source) && t.status === 'queue').length}`} progress={0} color="#ff3355" />            </div>
           </div>
 
           {/* Working Space */}
