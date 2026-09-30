@@ -40,6 +40,11 @@ react(),
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/bridge/, ''),
         },
+        '/ado': {
+          target: process.env.ADO_BRIDGE_URL || 'http://localhost:8000',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/ado/, ''),
+        },
       },
       watch: {
         ignored: [

@@ -28,8 +28,9 @@ export function loadDeveloper() {
   return TEST_DEVELOPERS[0].email
 }
 
-// Which lane (Todo/Working/Blocked) each item sits in, per developer, so the
-// board survives reloads. Items absent from the map are in the queue.
+// Which lane each item sits in, per developer, so the board survives reloads.
+// A saved 'queue' records an explicit move back to the queue (it overrides a
+// source's own lane hint); `null` forgets the item.
 const lanesKey = (developer: string) => `devDashboard.lanes.${developer}`
 
 export function loadLanes(developer: string): Record<string, Status> {
@@ -40,10 +41,10 @@ export function loadLanes(developer: string): Record<string, Status> {
   }
 }
 
-export function updateLanes(developer: string, changes: Record<string, Status>) {
+export function updateLanes(developer: string, changes: Record<string, Status | null>) {
   const lanes = loadLanes(developer)
   for (const [id, lane] of Object.entries(changes)) {
-    if (lane === 'queue') delete lanes[id]
+    if (lane === null) delete lanes[id]
     else lanes[id] = lane
   }
   try { localStorage.setItem(lanesKey(developer), JSON.stringify(lanes)) } catch { /* storage unavailable */ }
@@ -100,10 +101,12 @@ export interface Deadline {
   end: string | null
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BRIDGE_BASE}${path}`, init)
+async function request<T>(path: string, init?: RequestInit, base = BRIDGE_BASE): Promise<T> {
+  const res = await fetch(`${base}${path}`, init)
   const body = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(body?.error || `Bridge unreachable (HTTP ${res.status})`)
+  // notion-bridge errors are { error }, ado-bridge (FastAPI) errors are { detail }.
+  const message = body?.error || (typeof body?.detail === 'string' ? body.detail : null)
+  if (!res.ok) throw new Error(message || `Bridge unreachable (HTTP ${res.status})`)
   return body
 }
 
@@ -142,6 +145,135 @@ export const releaseItem = (id: string, queue: string, developer: string) =>
 
 export const markItemDone = (id: string, queue: string, developer: string) =>
   post(`/items/${id}/done`, { developer, queue })
+
+// ─── ADO bridge (User Stories) ────────────────────────────────────────────────
+
+const ADO_BASE = '/ado'
+const ADO_ITERATION_TEMPLATE = 'Blue Digital\\Sprint {number} {year}'
+const ADO_QUEUE_SLUG = 'ado-stories'
+const ADO_DONE_STATE = 'Closed'
+const ADO_LANE_STATES: Partial<Record<Status, string>> = { today: 'Active', working: 'Active', blocked: 'Blocked' }
+
+interface AdoWorkItem {
+  adoId: number
+  title: string
+  state: string | null
+  workItemType: string
+  assignedTo: string | null
+  assignedToName: string | null
+  description: string | null
+  acceptanceCriteria: string | null
+  storyPoints: number | null
+  priority: number | null
+  tags: string[]
+  iterationPath: string | null
+  parentId: number | null
+  url: string | null
+}
+
+const adoGet = <T>(path: string) => request<T>(path, undefined, ADO_BASE)
+const adoPut = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, ADO_BASE)
+
+const setAdoState = (adoId: string, state: string) => adoPut(`/workitems/${adoId}/state`, { state })
+
+function iterationFor(sprint: Sprint | null): string {
+  if (sprint?.number == null || !sprint.start) throw new Error('Current sprint unknown; cannot pick the ADO iteration')
+  return ADO_ITERATION_TEMPLATE.replace('{number}', String(sprint.number)).replace('{year}', sprint.start.slice(0, 4))
+}
+
+function htmlToText(html: string | null): string {
+  if (!html) return ''
+  return (new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '').replace(/\s+\n/g, '\n').trim()
+}
+
+// ADO acceptance criteria are HTML: prefer list items / paragraphs as lines.
+function htmlToLines(html: string | null): string[] {
+  if (!html) return []
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const blocks = [...doc.querySelectorAll('li, p')].map(el => el.textContent?.trim() ?? '').filter(Boolean)
+  return blocks.length ? blocks : htmlToText(html).split('\n').map(l => l.trim()).filter(Boolean)
+}
+
+function adoPriority(p: number | null): Priority {
+  if (p === 1) return 'high'
+  if (p === 2) return 'medium'
+  if (p != null && p >= 3) return 'low'
+  return 'none'
+}
+
+function adoStoryToTask(w: AdoWorkItem): Task {
+  const sprintNumber = w.iterationPath?.match(/Sprint (\d+)/)?.[1]
+  const description = htmlToText(w.description)
+  return {
+    id: String(w.adoId),
+    ref: `US-${w.adoId}`,
+    queue: ADO_QUEUE_SLUG,
+    url: w.url ?? undefined,
+    type: w.workItemType === 'Bug' ? 'bug' : 'story',
+    source: 'stories',
+    title: w.title,
+    description,
+    notes: description,
+    acceptanceCriteria: htmlToLines(w.acceptanceCriteria),
+    priority: adoPriority(w.priority),
+    points: w.storyPoints ?? undefined,
+    progress: 0,
+    assignee: initials(w.assignedToName ?? ''),
+    sprint: sprintNumber ? `SPR-${sprintNumber}` : undefined,
+    tags: w.tags,
+    status: 'queue',
+    comments: 0,
+    externalState: w.state ?? undefined,
+    affectedSystem: w.state ?? undefined,
+    parentId: w.parentId != null ? String(w.parentId) : undefined,
+  }
+}
+
+function adoStoriesQueue(): QueueAdapter {
+  return {
+    source: 'stories',
+    slug: ADO_QUEUE_SLUG,
+    load: async (developer, sprint) => {
+      const params = new URLSearchParams({ assignedTo: developer, iteration: iterationFor(sprint) })
+      const stories = await adoGet<AdoWorkItem[]>(`/workitems?${params}`)
+      const lanes: Record<string, Status> = {}
+      for (const s of stories) {
+        if (s.state === 'Active') lanes[String(s.adoId)] = 'today'
+        else if (s.state === 'Blocked') lanes[String(s.adoId)] = 'blocked'
+      }
+      return { items: stories.map(adoStoryToTask), claimedIds: [], lanes }
+    },
+    move: async (task, _from, to) => {
+      const state = ADO_LANE_STATES[to]
+      if (!state || state === task.externalState) return
+      await setAdoState(task.id, state)
+      return { externalState: state, affectedSystem: state }
+    },
+    done: task => setAdoState(task.id, ADO_DONE_STATE).then(() => undefined),
+    related: async task => {
+      if (!task.parentId) return [{ relation: 'parent', id: null, empty: true }]
+      try {
+        const p = await adoGet<AdoWorkItem>(`/workitems/${task.parentId}`)
+        return [{
+          relation: 'parent',
+          id: String(p.adoId),
+          url: p.url,
+          title: p.title,
+          properties: [
+            { name: 'Type', type: 'text', value: p.workItemType },
+            { name: 'State', type: 'text', value: p.state ?? '' },
+            { name: 'Assigned To', type: 'text', value: p.assignedToName ?? p.assignedTo ?? '' },
+            { name: 'Iteration', type: 'text', value: p.iterationPath ?? '' },
+          ],
+          content: htmlToText(p.description),
+        }]
+      } catch (e) {
+        return [{ relation: 'parent', id: task.parentId, error: e instanceof Error ? e.message : String(e) }]
+      }
+    },
+  }
+}
 
 // ─── Mapping bridge items to cards ────────────────────────────────────────────
 
@@ -197,16 +329,54 @@ function bridgeTask(item: BridgeItem, queue: string, fields: Pick<Task, 'ref' | 
   }
 }
 
-export interface BridgeQueue {
+// A queue source the board knows how to load and act on. Notion queues go
+// through notion-bridge; User Stories go through ado-bridge.
+export interface QueueAdapter {
+  source: QueueSource
+  slug: string
+  // Cards for the developer; claimedIds default to Todo when no lane is saved,
+  // and `lanes` lets a source place cards from its own state (e.g. ADO Blocked).
+  load: (developer: string, sprint: Sprint | null) => Promise<{ items: Task[]; claimedIds: string[]; lanes?: Record<string, Status> }>
+  // Returns fields to merge into the card after a successful write.
+  move?: (task: Task, from: Status, to: Status, developer: string) => Promise<Partial<Task> | void>
+  done?: (task: Task, developer: string) => Promise<void>
+  related?: (task: Task) => Promise<RelatedEntity[]>
+}
+
+function notionQueue({ source, slug, claimable, doneable, toTask }: {
   source: QueueSource
   slug: string
   claimable: boolean // drag out of the queue claims, drag back releases
-  doneable: boolean  // shows the Mark done button
+  doneable: boolean
   toTask: (item: BridgeItem, currentSprint: number | null) => Task
+}): QueueAdapter {
+  return {
+    source,
+    slug,
+    load: async (developer, sprint) => {
+      const { items, claimed } = await fetchQueue(slug, developer)
+      const seen = new Set<string>()
+      const all = [...items, ...claimed].filter(i => !seen.has(i.id) && seen.add(i.id))
+      return { items: all.map(i => toTask(i, sprint?.number ?? null)), claimedIds: claimed.map(i => i.id) }
+    },
+    move: claimable
+      ? async (task, from, to, developer) => {
+        if (from === 'queue' && to !== 'queue') await claimItem(task.id, slug, developer)
+        else if (from !== 'queue' && to === 'queue') await releaseItem(task.id, slug, developer)
+      }
+      : undefined,
+    done: doneable ? (task, developer) => markItemDone(task.id, slug, developer).then(() => undefined) : undefined,
+    related: task => fetchRelated(task.id, slug),
+  }
 }
 
-export const BRIDGE_QUEUES: BridgeQueue[] = [
-  {
+// ADO User Stories stay off while ado-bridge serves mock data (ADO_MOCK=true).
+// Start the dev server with VITE_ADO_STORIES=true to turn them back on.
+export const ADO_STORIES_ENABLED = import.meta.env.VITE_ADO_STORIES === 'true'
+
+export const QUEUES: QueueAdapter[] = [
+  ...(ADO_STORIES_ENABLED ? [adoStoriesQueue()] : []),
+  notionQueue({
     source: 'tasks',
     slug: 'sprint-developer-items',
     claimable: false,
@@ -224,8 +394,8 @@ export const BRIDGE_QUEUES: BridgeQueue[] = [
         standupAgeDays: age,
       })
     },
-  },
-  {
+  }),
+  notionQueue({
     source: 'pulse',
     slug: 'pulse-queue',
     claimable: true,
@@ -242,8 +412,8 @@ export const BRIDGE_QUEUES: BridgeQueue[] = [
         link: displayValue(item, 'Link') || undefined,
       })
     },
-  },
-  {
+  }),
+  notionQueue({
     source: 'solarwinds',
     slug: 'solarwinds',
     claimable: false,
@@ -260,10 +430,10 @@ export const BRIDGE_QUEUES: BridgeQueue[] = [
         link: displayValue(item, 'Link') || undefined,
       })
     },
-  },
+  }),
 ]
 
-export const bridgeQueueFor = (task: Task) => BRIDGE_QUEUES.find(q => q.slug === task.queue)
+export const queueFor = (task: Task) => QUEUES.find(q => q.slug === task.queue)
 
 // ─── Dates ────────────────────────────────────────────────────────────────────
 

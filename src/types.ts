@@ -21,6 +21,8 @@ export interface Task {
   link?: string
   notes?: string
   standupAgeDays?: number
+  externalState?: string
+  parentId?: string
   type: TaskType
   source: QueueSource
   title: string

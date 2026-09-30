@@ -2,11 +2,10 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react
 
 import type { Initiative, Priority, QueueSource, Status, Task, TaskType } from './types'
 import {
-  BRIDGE_QUEUES, BRIDGE_REFRESH_MS, CALENDAR_LOOKAHEAD_DAYS, CONTEXT_REFRESH_MS, DEADLINE_TICKER_DAYS,
-  DEVELOPER_STORAGE_KEY, STALE_STANDUP_DAYS, TEST_DEVELOPERS,
-  addDays, bridgeQueueFor, claimItem, daysBetween, deadlineTickerText, fetchCurrentSprint, fetchDeadlines,
-  fetchQueue, fetchRelated, fetchStandup, formatSprintRange, loadDeveloper, loadLanes, localIsoDate,
-  markItemDone, releaseItem, shortDate, updateLanes,
+  BRIDGE_REFRESH_MS, CALENDAR_LOOKAHEAD_DAYS, CONTEXT_REFRESH_MS, DEADLINE_TICKER_DAYS,
+  ADO_STORIES_ENABLED, DEVELOPER_STORAGE_KEY, STALE_STANDUP_DAYS, TEST_DEVELOPERS,
+  QUEUES, addDays, daysBetween, deadlineTickerText, fetchCurrentSprint, fetchDeadlines,
+  fetchStandup, formatSprintRange, loadDeveloper, loadLanes, localIsoDate, queueFor, shortDate, updateLanes,
 } from './bridge'
 import type { BriefLine, Deadline, RelatedEntity, Sprint, StandupBrief } from './bridge'
 import BootScreen from './BootScreen'
@@ -24,43 +23,6 @@ const INITIATIVES: Record<string, Initiative> = {
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 
 const INITIAL_TASKS: Task[] = [
-  // Stories
-  {
-    id: 'US-1042', type: 'story', source: 'stories', title: 'Auth token refresh flow',
-    description: 'Implement silent token refresh with exponential backoff. Store refresh token in httpOnly cookie. Must not interrupt active sessions.',
-    priority: 'critical', points: 8, progress: 30, assignee: 'JR', sprint: 'SPR-42',
-    tags: ['auth', 'security'], status: 'queue', comments: 4, branch: 'feat/auth-refresh',
-    initiative: INITIATIVES['INIT-07'],
-    acceptanceCriteria: ['Token refreshes silently 60s before expiry', 'Failed refresh redirects to login after 3 retries', 'Refresh token stored in httpOnly cookie only', 'Concurrent requests queued during refresh'],
-    subtasks: [{ title: 'Write refresh interceptor', done: true }, { title: 'Handle 401 retry queue', done: false }, { title: 'Unit tests', done: false }],
-    activity: [{ user: 'JR', time: '09:12', text: 'Started interceptor implementation' }, { user: 'MK', time: '08:55', text: 'Added to security hardening epic' }],
-  },
-  {
-    id: 'US-1038', type: 'story', source: 'stories', title: 'Dashboard data export',
-    description: 'Allow users to export filtered dashboard data to CSV and JSON. Column selection dialog. Max 50k rows with async job for larger sets.',
-    priority: 'high', points: 5, progress: 0, assignee: 'MK', sprint: 'SPR-42',
-    tags: ['export', 'data'], status: 'queue', comments: 2,
-    initiative: INITIATIVES['INIT-09'],
-    acceptanceCriteria: ['CSV and JSON format support', 'Column selection persists per user', 'Async export for >10k rows with email notification', 'Progress indicator during export'],
-    activity: [{ user: 'MK', time: '07:30', text: 'ZD-8841 linked — customer-reported blocker' }],
-  },
-  {
-    id: 'US-1035', type: 'story', source: 'stories', title: 'Notification preferences panel',
-    description: 'User-configurable notification channels and frequency settings per event type. Support email, Slack, webhook.',
-    priority: 'medium', points: 3, progress: 0, assignee: 'JR', sprint: 'SPR-42',
-    tags: ['notifications', 'settings'], status: 'queue', comments: 1,
-    initiative: INITIATIVES['INIT-09'],
-    acceptanceCriteria: ['Per-event-type channel selection', 'Digest/instant/mute frequency options', 'Webhook URL validation', 'Settings exportable via API'],
-  },
-  {
-    id: 'US-1030', type: 'story', source: 'stories', title: 'Team activity feed',
-    description: 'Real-time feed of team actions. Filterable by type and actor. Infinite scroll with 90-day retention.',
-    priority: 'low', points: 5, progress: 0, assignee: 'MK', sprint: 'SPR-43',
-    tags: ['feed', 'realtime'], status: 'queue', comments: 2,
-    initiative: INITIATIVES['INIT-09'],
-    acceptanceCriteria: ['WebSocket-pushed updates', 'Filter by user, event type, date range', 'Infinite scroll', 'Exportable as CSV'],
-  },
-
   // Zendesk
   {
     id: 'ZD-8841', type: 'ticket', source: 'zendesk', title: 'Export fails > 10k rows · Acme Corp',
@@ -137,14 +99,14 @@ const TYPE_CONFIG: Record<TaskType, { label: string; cls: string }> = {
   incident: { label: 'INCIDENT', cls: 'tag-bug'   },
 }
 
-const SOURCE_TABS: { id: QueueSource; label: string; color: string }[] = [
+const SOURCE_TABS = ([
   { id: 'stories',    label: 'Stories',    color: '#a855f7' },
   { id: 'tasks',      label: 'Tasks',      color: '#00d4ff' },
   { id: 'pulse',      label: 'Pulse',      color: '#00ff88' },
   { id: 'solarwinds', label: 'Solarwinds', color: '#ffaa00' },
   { id: 'zendesk',    label: 'Zendesk',    color: '#f97316' },
   { id: 'ads',        label: 'ADS',        color: '#60a5fa' },
-]
+] satisfies { id: QueueSource; label: string; color: string }[]).filter(tab => tab.id !== 'stories' || ADO_STORIES_ENABLED)
 
 const ASSIGNEE_COLORS: Record<string, string> = {
   JR: '#00d4ff', MK: '#a855f7', AR: '#00ff88',
@@ -417,15 +379,22 @@ function InitiativePanel({ initiative }: { initiative: Initiative }) {
 
 // ─── Working Space ────────────────────────────────────────────────────────────
 
-const RELATION_LABELS: Record<string, string> = { initiative: 'INITIATIVE', issue: 'ISSUE', analystIssue: 'ANALYST ISSUE' }
+const RELATION_LABELS: Record<string, string> = { initiative: 'INITIATIVE', issue: 'ISSUE', analystIssue: 'ANALYST ISSUE', parent: 'PARENT' }
 const RELATION_FIELDS: Record<string, string[]> = {
   initiative: ['Status', 'Impact', 'Deadline', 'Countdown'],
   issue: ['Status', 'Priority'],
   analystIssue: ['Status', 'Priority'],
+  parent: ['State', 'Assigned To', 'Iteration'],
 }
 const RELATION_TEXT_FIELDS = ['Description', 'Notes']
 
-const relationLabel = (entity: RelatedEntity) => RELATION_LABELS[entity.relation] ?? entity.relation.toUpperCase()
+const linkTarget = (url: string) => (url.includes('dev.azure.com') ? 'ADO' : 'NOTION')
+
+// ADO parents are labelled by their work item type (FEATURE, EPIC, …).
+const relationLabel = (entity: RelatedEntity) => {
+  const type = entity.relation === 'parent' ? entity.properties?.find(p => p.name === 'Type')?.value : undefined
+  return (type || RELATION_LABELS[entity.relation] || entity.relation).toUpperCase()
+}
 
 function RelatedCard({ entity, onOpen }: { entity: RelatedEntity; onOpen: () => void }) {
   const prop = (name: string) => entity.properties?.find(p => p.name === name)?.value ?? ''
@@ -449,7 +418,7 @@ function RelatedCard({ entity, onOpen }: { entity: RelatedEntity; onOpen: () => 
             </div>
           )}
           {text && <div style={{ fontSize: 10, color: '#7aa0c0', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden', whiteSpace: 'pre-line' }}>{text}</div>}
-          {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-block', marginTop: 5, fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN NOTION ↗</a>}
+          {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-block', marginTop: 5, fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN {linkTarget(entity.url)} ↗</a>}
         </>
       )}
     </div>
@@ -465,7 +434,7 @@ function RelatedPanel({ related }: { related: RelatedEntity[] | 'loading' | { er
   }
   const linked = related.filter(r => !r.empty)
   if (linked.length === 0) {
-    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.6 }}>No initiative or issue linked</span>
+    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.6 }}>No linked initiative, issue, or parent</span>
   }
   return <RelatedCards linked={linked} />
 }
@@ -491,7 +460,7 @@ function RelatedModal({ entity, onClose }: { entity: RelatedEntity; onClose: () 
     <Overlay onClose={onClose}>
       <div style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(0,212,255,0.06)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.12em', color: '#00d4ff' }}>{relationLabel(entity)}</span>
-        {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN NOTION ↗</a>}
+        {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN {linkTarget(entity.url)} ↗</a>}
         <button onClick={onClose} title="Close (Esc)" style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', width: 24, height: 24, borderRadius: 3, cursor: 'pointer' }}>✕</button>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14, zoom: 1.2 }}>
@@ -558,7 +527,7 @@ function WorkingSpace({ task, related, onClear, onDone, onDragStart }: {
         <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', color: '#00d4ff' }}>ACTIVE</span>
         <Tag cls={tc.cls}>{tc.label}</Tag>
         <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>{task.ref ?? task.id}</span>
-        {task.url && <a href={task.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>NOTION ↗</a>}
+        {task.url && <a href={task.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>{linkTarget(task.url)} ↗</a>}
         {task.link && <a href={task.link} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>TICKET ↗</a>}
         <span style={{ marginLeft: 'auto' }} />
         {onDone && <DoneButton onDone={onDone} size={9} />}
@@ -618,7 +587,7 @@ function WorkingSpace({ task, related, onClear, onDone, onDragStart }: {
             </div>
           )}
 
-          {task.acceptanceCriteria && (
+          {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
             <div>
               <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.1em', color: '#4a6a84', marginBottom: 5 }}>ACCEPTANCE CRITERIA</div>
               {task.acceptanceCriteria.map((ac, i) => (
@@ -727,7 +696,7 @@ export default function App() {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<'today' | 'working' | 'blocked' | 'queue' | null>(null)
   const [centerTab, setCenterTab] = useState<'brief' | 'calendar'>('brief')
-  const [queueTab, setQueueTab] = useState<QueueSource>('stories')
+  const [queueTab, setQueueTab] = useState<QueueSource>(SOURCE_TABS[0].id)
   const [modalTask, setModalTask] = useState<Task | null>(null)
   const [time, setTime] = useState(new Date())
   const [bridgeLoading, setBridgeLoading] = useState(true)
@@ -745,7 +714,7 @@ export default function App() {
 
   const changeDeveloper = (email: string) => {
     try { localStorage.setItem(DEVELOPER_STORAGE_KEY, email) } catch { /* storage unavailable */ }
-    const bridgeSources = new Set(BRIDGE_QUEUES.map(q => q.source))
+    const bridgeSources = new Set(QUEUES.map(q => q.source))
     setTasks(prev => prev.filter(t => !bridgeSources.has(t.source)))
     setBridgeLoading(true)
     setBrief(null)
@@ -771,28 +740,29 @@ export default function App() {
       setSprint(currentSprint)
       setSprintStatus(currentSprint ? 'ok' : 'fail')
 
-      const results = await Promise.allSettled(BRIDGE_QUEUES.map(q => fetchQueue(q.slug, developer)))
+      const results = await Promise.allSettled(QUEUES.map(q => q.load(developer, currentSprint)))
       if (cancelled) return
 
       const errors: Partial<Record<QueueSource, string>> = {}
-      BRIDGE_QUEUES.forEach((q, i) => {
+      QUEUES.forEach((q, i) => {
         const r = results[i]
         if (r.status === 'rejected') errors[q.source] = r.reason instanceof Error ? r.reason.message : String(r.reason)
       })
       const lanes = loadLanes(developer)
       setTasks(prev => {
         let next = prev
-        BRIDGE_QUEUES.forEach((q, i) => {
+        QUEUES.forEach((q, i) => {
           const r = results[i]
           if (r.status === 'rejected') return
-          const claimedIds = new Set(r.value.claimed.map(item => item.id))
-          const seen = new Set<string>()
-          const fresh = [...r.value.items, ...r.value.claimed]
-            .filter(item => !seen.has(item.id) && seen.add(item.id))
-            .map(item => ({
-              ...q.toTask(item, currentSprint?.number ?? null),
-              status: lanes[item.id] ?? (claimedIds.has(item.id) ? 'today' : 'queue'),
-            }))
+          const claimedIds = new Set(r.value.claimedIds)
+          // A source-reported Blocked always wins; otherwise the saved lane, then
+          // the source's hint, then claimed → Todo.
+          const laneFor = (id: string): Status => {
+            const hinted = r.value.lanes?.[id]
+            if (hinted === 'blocked') return 'blocked'
+            return lanes[id] ?? hinted ?? (claimedIds.has(id) ? 'today' : 'queue')
+          }
+          const fresh = r.value.items.map(task => ({ ...task, status: laneFor(task.id) }))
           next = [...next.filter(t => t.source !== q.source), ...fresh]
         })
         return next
@@ -826,9 +796,11 @@ export default function App() {
   // Related Initiative / Issue / Analyst Issue for the active item.
   useEffect(() => {
     if (!workingTask?.queue || related[workingTask.id]) return
-    const { id, queue } = workingTask
+    const { id } = workingTask
     setRelated(prev => ({ ...prev, [id]: 'loading' }))
-    fetchRelated(id, queue)
+    const adapter = queueFor(workingTask)
+    if (!adapter?.related) return
+    adapter.related(workingTask)
       .then(r => setRelated(prev => ({ ...prev, [id]: r })))
       .catch(e => setRelated(prev => ({ ...prev, [id]: { error: e instanceof Error ? e.message : String(e) } })))
   }, [workingTask, related])
@@ -850,32 +822,31 @@ export default function App() {
     setLane(to, 'today')
     setActionError(null)
 
-    const q = bridgeQueueFor(task)
-    if (!q?.claimable) return
-    const action = from === 'queue' && to !== 'queue' ? 'claim' : from !== 'queue' && to === 'queue' ? 'release' : null
-    if (!action) return
+    const move = queueFor(task)?.move
+    if (!move) return
     try {
-      await (action === 'claim' ? claimItem : releaseItem)(id, q.slug, developer)
+      const patch = await move(task, from, to, developer)
+      if (patch) setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)))
     } catch (e) {
       setLane(from, 'working')
-      setActionError(`Couldn't ${action} ${task.ref ?? task.title}: ${e instanceof Error ? e.message : String(e)}`)
+      setActionError(`Couldn't move ${task.ref ?? task.title}: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
   const markDone = async (task: Task) => {
-    const q = bridgeQueueFor(task)
-    if (!q?.doneable) return
+    const done = queueFor(task)?.done
+    if (!done) return
     setActionError(null)
     try {
-      await markItemDone(task.id, q.slug, developer)
+      await done(task, developer)
       setTasks(prev => prev.filter(t => t.id !== task.id))
-      updateLanes(developer, { [task.id]: 'queue' })
+      updateLanes(developer, { [task.id]: null })
       setModalTask(m => (m?.id === task.id ? null : m))
     } catch (e) {
       setActionError(`Couldn't mark ${task.ref ?? task.title} done: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
-  const doneHandler = (task: Task) => (bridgeQueueFor(task)?.doneable ? () => markDone(task) : undefined)
+  const doneHandler = (task: Task) => (queueFor(task)?.done ? () => markDone(task) : undefined)
 
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
     e.dataTransfer.effectAllowed = 'move'
@@ -922,13 +893,13 @@ export default function App() {
   const calendarItems = deadlines
     .filter(d => (d.end ?? d.start) >= today && d.start <= calendarEnd)
     .sort((a, b) => a.start.localeCompare(b.start))
-  const queuesFailed = BRIDGE_QUEUES.every(q => bridgeErrors[q.source])
+  const queuesFailed = QUEUES.every(q => bridgeErrors[q.source])
   const queuesStatus: BootStepState = bridgeLoading ? 'pending' : queuesFailed ? 'fail' : 'ok'
   const briefStatus: BootStepState = !brief ? 'pending' : 'error' in brief ? 'fail' : 'ok'
   const bootSteps: BootStep[] = [
     { label: 'establishing uplink to notion-bridge', state: sprintStatus === 'pending' ? 'pending' : sprintStatus === 'ok' || queuesStatus === 'ok' ? 'ok' : 'fail' },
     { label: 'syncing current sprint', state: sprintStatus },
-    { label: 'loading queues · tasks / pulse / solarwinds', state: queuesStatus },
+    { label: `loading queues · ${ADO_STORIES_ENABLED ? 'stories / ' : ''}tasks / pulse / tickets`, state: queuesStatus },
     { label: 'compiling daily brief', state: briefStatus },
     { label: 'plotting deadlines & milestones', state: deadlinesStatus },
   ]
@@ -1064,7 +1035,7 @@ export default function App() {
                 BRIDGE ERROR · {bridgeErrors[queueTab]}
               </div>
             )}
-            {bridgeLoading && BRIDGE_QUEUES.some(q => q.source === queueTab) && queueTasks.length === 0 ? (
+            {bridgeLoading && QUEUES.some(q => q.source === queueTab) && queueTasks.length === 0 ? (
               <div style={{ padding: '20px 8px', textAlign: 'center', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>LOADING…</div>
             ) : queueTasks.length === 0 ? (
               <div style={{ padding: '20px 8px', textAlign: 'center', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.5 }}>NO ITEMS IN QUEUE</div>
@@ -1104,7 +1075,7 @@ export default function App() {
             <div style={{ width: 174, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 9, flexShrink: 0 }}>
               <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.15em', color: '#00d4ff', fontWeight: 700 }}>SPRINT VELOCITY</div>
               <SprintMetric label="BURNDOWN" value={`${sprintProgress}%`} progress={sprintProgress} color="#00d4ff" />
-              <SprintMetric label="STORIES" value={`0/${tasks.filter(t => t.source === 'stories').length}`} progress={0} color="#a855f7" />
+              {ADO_STORIES_ENABLED && <SprintMetric label="STORIES" value={`0/${tasks.filter(t => t.source === 'stories').length}`} progress={0} color="#a855f7" />}
               <SprintMetric label="TASKS" value={`0/${tasks.filter(t => t.source === 'tasks').length}`} progress={0} color="#00ff88" />
               <SprintMetric label="OPEN ALERTS" value={`${tasks.filter(t => ['pulse', 'solarwinds', 'ads'].includes(t.source) && t.status === 'queue').length}`} progress={0} color="#ff3355" />
               <SprintMetric label="TICKETS" value={`${tasks.filter(t => t.source === 'zendesk' && t.status === 'queue').length}`} progress={0} color="#f97316" />
