@@ -24,3 +24,7 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Corporate root CAs for the Docker build (see certs/README.md)
+certs/*.crt
+certs/*.pem

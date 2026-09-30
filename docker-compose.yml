@@ -1,0 +1,18 @@
+services:
+  dashboard:
+    build:
+      context: .
+      args:
+        # Set to true once ado-bridge serves real Azure DevOps data (needs a rebuild).
+        VITE_ADO_STORIES: ${VITE_ADO_STORIES:-false}
+    image: developer-dashboard
+    ports:
+      - "${DASHBOARD_PORT:-8080}:80"
+    environment:
+      # The bridges run as their own containers/processes, published on the host.
+      NOTION_BRIDGE_URL: ${NOTION_BRIDGE_URL:-http://host.docker.internal:3100}
+      ADO_BRIDGE_URL: ${ADO_BRIDGE_URL:-http://host.docker.internal:8000}
+    extra_hosts:
+      # Makes host.docker.internal work on Linux too (built in on Docker Desktop).
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

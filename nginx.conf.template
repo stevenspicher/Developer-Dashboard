@@ -1,0 +1,28 @@
+# Serves the built dashboard and forwards API calls the way the Vite dev server
+# proxy does (vite.config.ts): /bridge/* → notion-bridge, /ado/* → ado-bridge,
+# with the prefix stripped. ${VARS} are filled in by the nginx image at startup.
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+
+    location /bridge/ {
+        proxy_pass ${NOTION_BRIDGE_URL}/;
+        # Cold Notion reads (queues + related context) can take a while.
+        proxy_read_timeout 120s;
+    }
+
+    location /ado/ {
+        proxy_pass ${ADO_BRIDGE_URL}/;
+        proxy_read_timeout 120s;
+    }
+
+    location /assets/ {
+        # Hashed filenames — safe to cache forever.
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    location / {
+        try_files $uri /index.html;
+        add_header Cache-Control "no-cache";
+    }
+}
