@@ -3,7 +3,8 @@
 Status: implemented, tested, and pushed on 2026-09-29; updated 2026-10-02.
 - **notion-bridge:** `e0108e9` on `stevenspicher/notion-bridge` (main)
 - **Developer Dashboard:** `9f1cfc7` on `stevenspicher/Developer-Dashboard` (main)
-- **2026-10-02 update:** `94843b2`: real sprint metrics, readable descriptions, and the design-token and legibility pass (§4 Styling, §5).
+- **2026-10-02 dashboard update:** `94843b2`: real sprint metrics, readable descriptions, and the design-token and legibility pass (§4 Styling, §5).
+- **2026-10-02 notion-bridge fix:** `10eda90`: briefs with `heading_2` sections parse again (§2).
 
 ## 1. Overview
 For the full bridge API contract (request and response shapes, errors, integration checklist), see [`Notion Bridge INTEGRATION.md`](../Notion%20Bridge%20INTEGRATION.md).
@@ -44,10 +45,10 @@ The bridge drives almost everything from `config/manifest.json`. Adding or retun
 **Naming conventions the bridge relies on** (patterns are configurable in the manifest `standups` block):
 - The current sprint page holds its standup pages somewhere in its block tree (toggles and columns are fine), titled `M/D Standup`.
 - Each standup page has child pages titled `Sprint N – YYYY-MM-DD – Morning Brief – {FirstName}` and `Sprint N – YYYY-MM-DD – Leadership Summary`.
-- Brief sections are `heading_3`s:
-  - Morning Brief: `1) Team Items`, `2) Your responsibilities today`, `3) Aging items check`, and a closing section, which is ignored.
+- Brief sections start at headings:
+  - Morning Brief: `Team Items`, `Your responsibilities today`, `Aging items check`, and a closing section, which is ignored.
   - Leadership Summary: `Team Items`, then one heading per developer, `{Name} – YYYY-MM-DD`.
-  - Briefs from 2026-10-02 on use `heading_2` sections without the numbers (`## Team Items`), which the bridge doesn't parse yet (see §6).
+  - Briefs through 2026-10-01 use numbered `heading_3`s (`1) Team Items`); briefs since 2026-10-02 use `heading_2`s without numbers. The bridge starts a section at any heading level and ignores a `1)` or `1.` prefix.
 
 **Test rows:** a row named `Bridge Test` in Pulse Queue and in Sprint Developer Items. Both are unassigned and left in their original state.
 
@@ -216,6 +217,11 @@ Zendesk and ADS have no queue yet, so their tabs are hidden.
   All three render with their structure and working links.
 - **States:** stories show New, and Active after a move to Working; the Solarwinds ticket shows Monitoring. The detail modal labels it STATE.
 - **Sprint panel:** Day 10/14 on 2026-10-02. Philip's stories showed 0/5 · 0/9 PT from the mock seed.
+- **Briefs after the notion-bridge heading fix:**
+  - Philip's 10/02 Morning Brief parses to 4 team items, 6 responsibilities and 3 aging lines.
+  - Steven gets the 10/02 Leadership Summary with 5 developer updates.
+  - The 10/01 `heading_3` briefs still parse the same way.
+  - The dashboard shows the brief and the team items in the ticker again.
 
 **2026-09-29 (notion-bridge integration):**
 - **Write access:** Task done set Mark Done ✓ and Status Done; I reverted it afterwards.
@@ -249,7 +255,6 @@ Zendesk and ADS have no queue yet, so their tabs are hidden.
   - The Stories tab is off unless the dev server starts with `VITE_ADO_STORIES=true`.
   - While `ADO_MOCK=true`, ado-bridge serves a local seed. Moves and ✓ DONE change only its in-memory copy, which resets when it restarts.
 - **No done/total for Notion queues:** notion-bridge returns only open Sprint Developer Items and Pulse rows, so the Sprint panel shows open counts for them.
-- **Brief headings changed:** briefs from 2026-10-02 on use `heading_2` sections without numbers. notion-bridge only splits sections at `heading_3` (`standupService.js`), so these briefs come back empty for every developer. The fix belongs in notion-bridge.
 - **Solarwinds re-imports:** replacing rows via CSV re-import loses any relations set by hand.
 - **Brief matching:** briefs are matched by the Notion user's first name, so two developers with the same first name would collide.
 - **Release target:** Pulse release always goes to `Pending`, not back to the item's previous status.
