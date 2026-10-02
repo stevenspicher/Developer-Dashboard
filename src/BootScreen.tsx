@@ -131,41 +131,38 @@ export default function BootScreen({ login, firstName, sprintNumber, steps, summ
   }, [tick])
 
   const statusCell = (s: BootStepState) =>
-    s === 'ok' ? <span style={{ color: '#00ff88' }}>[  OK  ]</span>
-      : s === 'fail' ? <span style={{ color: '#ff3355' }}>[ FAIL ]</span>
-        : <span style={{ color: '#ffaa00' }}>[  {SPINNER[Math.floor(tick / 6) % SPINNER.length]}   ]</span>
+    s === 'ok' ? <span className="text-ok">[  OK  ]</span>
+      : s === 'fail' ? <span className="text-danger">[ FAIL ]</span>
+        : <span className="text-warn">[  {SPINNER[Math.floor(tick / 6) % SPINNER.length]}   ]</span>
 
   const greetingDone = greetingChars >= greeting.length
 
   return (
     <div
       onClick={finish}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 200, background: '#03060c', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        opacity: fading ? 0 : 1, transition: `opacity ${FADE_MS}ms ease ${HOLD_MS}ms`,
-      }}
+      className="boot-screen fixed inset-0 z-200 flex cursor-pointer items-center justify-center"
+      style={{ opacity: fading ? 0 : 1, transition: `opacity ${FADE_MS}ms ease ${HOLD_MS}ms` }}
     >
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'repeating-linear-gradient(0deg, rgba(0,212,255,0.035) 0px, rgba(0,212,255,0.035) 1px, transparent 1px, transparent 3px)' }} />
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.65) 100%)' }} />
+      <div className="crt-scanlines pointer-events-none absolute inset-0" />
+      <div className="crt-vignette pointer-events-none absolute inset-0" />
 
-      <pre style={{ position: 'relative', fontFamily: 'JetBrains Mono', fontSize: 13, lineHeight: 1.7, color: '#7fe3ff', margin: 0, padding: 24, width: 680, maxWidth: '100%', whiteSpace: 'pre-wrap', textShadow: '0 0 6px rgba(0,212,255,0.35)' }}>
+      <pre className="crt-glow relative m-0 w-[680px] max-w-full whitespace-pre-wrap p-6 font-mono text-body leading-[1.7] text-phosphor">
         <span>{header.slice(0, headerChars)}</span>
         {steps.slice(0, visibleSteps).map(step => (
           <div key={step.label}>
-            <span style={{ color: '#4a8ca8' }}>{'> '}</span>
-            <span style={{ color: '#c8dff0' }}>{`${step.label} `.padEnd(LABEL_WIDTH, '.')}</span>
+            <span className="text-muted">{'> '}</span>
+            <span className="text-fg">{`${step.label} `.padEnd(LABEL_WIDTH, '.')}</span>
             {' '}{statusCell(step.state)}
           </div>
         ))}
         {greetingChars > 0 && (
-          <div style={{ marginTop: 14 }}>
-            <span style={{ color: '#00ff88', textShadow: '0 0 8px rgba(0,255,136,0.5)', fontWeight: 600 }}>{greeting.slice(0, greetingChars)}</span>
+          <div className="mt-3.5">
+            <span className="crt-glow-ok font-semibold text-ok">{greeting.slice(0, greetingChars)}</span>
           </div>
         )}
-        {greetingDone && summary && <div style={{ color: '#4a8ca8', fontSize: 11 }}>{summary}</div>}
-        <span className="blink" style={{ display: 'inline-block', width: 8, height: 15, background: '#7fe3ff', verticalAlign: 'text-bottom', marginTop: 4 }} />
-        <div style={{ position: 'fixed', bottom: 18, left: 0, right: 0, textAlign: 'center', fontSize: 9, color: '#2c4a60', letterSpacing: '0.2em' }}>PRESS ANY KEY TO SKIP</div>
+        {greetingDone && summary && <div className="text-meta text-muted">{summary}</div>}
+        <span className="blink mt-1 inline-block h-[15px] w-2 bg-phosphor align-text-bottom" />
+        <div className="fixed inset-x-0 bottom-[18px] text-center text-meta tracking-[0.2em] text-muted">PRESS ANY KEY TO SKIP</div>
       </pre>
     </div>
   )

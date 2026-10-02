@@ -152,6 +152,7 @@ const ADO_BASE = '/ado'
 const ADO_ITERATION_TEMPLATE = 'Blue Digital\\Sprint {number} {year}'
 const ADO_QUEUE_SLUG = 'ado-stories'
 const ADO_DONE_STATE = 'Closed'
+const ADO_CLOSED_STATES = new Set(['Closed', 'Removed']) // hidden from the board, as in ado-bridge
 const ADO_LANE_STATES: Partial<Record<Status, string>> = { today: 'Active', working: 'Active', blocked: 'Blocked' }
 
 interface AdoWorkItem {
@@ -182,18 +183,97 @@ function iterationFor(sprint: Sprint | null): string {
   return ADO_ITERATION_TEMPLATE.replace('{number}', String(sprint.number)).replace('{year}', sprint.start.slice(0, 4))
 }
 
+const BLOCK_TAGS = new Set([
+  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DIV', 'DL', 'DT', 'FIGURE', 'FOOTER', 'FORM',
+  'HEADER', 'HR', 'MAIN', 'NAV', 'SECTION', 'TABLE', 'TBODY', 'THEAD', 'TR',
+])
+const LINKABLE = /^(?:https?:|mailto:)/i
+
+// ADO rich text → text that keeps its structure for RichText: a line break per
+// block, blank lines between paragraphs, "• " / "1. " list items (indented
+// when nested) and links as [label](url). Bold, italics and colours are dropped.
 function htmlToText(html: string | null): string {
   if (!html) return ''
-  return (new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '').replace(/\s+\n/g, '\n').trim()
+  let out = ''
+  const afterMarker = () => /(?:^|\n) *(?:•|\d+\.) $/.test(out)
+  const newline = () => { if (out && !out.endsWith('\n') && !afterMarker()) out += '\n' }
+  const blankLine = () => { newline(); if (out && !out.endsWith('\n\n') && !afterMarker()) out += '\n' }
+
+  const walk = (node: Node, depth: number, pre: boolean) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        let text = (child.textContent ?? '').replace(/ /g, ' ')
+        if (!pre) {
+          text = text.replace(/\s+/g, ' ')
+          if (out === '' || /\s$/.test(out)) text = text.trimStart()
+        }
+        out += text
+        continue
+      }
+      if (!(child instanceof Element)) continue
+      const tag = child.tagName
+      if (tag === 'BR') {
+        out = out.replace(/ +$/, '') + '\n'
+      } else if (tag === 'A' && LINKABLE.test(child.getAttribute('href') ?? '')) {
+        // Encode ")" and spaces so the URL survives the [label](url) syntax.
+        const href = child.getAttribute('href')!.trim().replace(/\)/g, '%29').replace(/\s/g, '%20')
+        const label = (child.textContent ?? '').replace(/\s+/g, ' ').trim()
+        out += !label || label === href ? href : `[${label.replace(/[[\]]/g, '')}](${href})`
+      } else if (tag === 'IMG') {
+        const src = child.getAttribute('src') ?? ''
+        if (LINKABLE.test(src)) out += `[image](${src})`
+      } else if (tag === 'UL' || tag === 'OL') {
+        newline(); walk(child, depth + 1, pre); newline()
+      } else if (tag === 'LI') {
+        newline()
+        const list = child.parentElement
+        const marker = list?.tagName === 'OL'
+          ? `${Array.from(list.children).filter(c => c.tagName === 'LI').indexOf(child) + 1}. `
+          : '• '
+        out += '  '.repeat(Math.max(0, depth - 1)) + marker
+        walk(child, depth, pre)
+        newline()
+      } else if (tag === 'P' || /^H[1-6]$/.test(tag)) {
+        const gap = child.closest('li') ? newline : blankLine
+        gap(); walk(child, depth, pre); gap()
+      } else if (tag === 'PRE') {
+        newline(); walk(child, depth, true); newline()
+      } else if (tag === 'TD' || tag === 'TH') {
+        if (child.previousElementSibling) out += ' · '
+        walk(child, depth, pre)
+      } else if (tag === 'SCRIPT' || tag === 'STYLE') {
+        continue
+      } else if (BLOCK_TAGS.has(tag)) {
+        newline(); walk(child, depth, pre); newline()
+      } else {
+        walk(child, depth, pre)
+      }
+    }
+  }
+
+  walk(new DOMParser().parseFromString(html, 'text/html').body, 0, false)
+  return out
+    .split('\n').map(line => line.trimEnd()).join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\n+/, '')
+    .trimEnd()
 }
 
-// ADO acceptance criteria are HTML: prefer list items / paragraphs as lines.
+// ADO acceptance criteria are HTML: one line per list item or paragraph.
 function htmlToLines(html: string | null): string[] {
-  if (!html) return []
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  const blocks = [...doc.querySelectorAll('li, p')].map(el => el.textContent?.trim() ?? '').filter(Boolean)
-  return blocks.length ? blocks : htmlToText(html).split('\n').map(l => l.trim()).filter(Boolean)
+  return htmlToText(html)
+    .split('\n')
+    .map(line => line.replace(/^\s*(?:•|\d+\.)\s+/, '').trim())
+    .filter(Boolean)
 }
+
+const LINK_MARKUP = /\[([^\]\n]+)\]\((?:https?:\/\/|mailto:)[^\s)]+\)/g
+
+// Text for previews: link labels without their URLs.
+export const stripLinks = (text: string) => text.replace(LINK_MARKUP, '$1')
+
+// Single-line preview text: links stripped and whitespace collapsed.
+export const plainText = (text: string) => stripLinks(text).replace(/\s+/g, ' ').trim()
 
 function adoPriority(p: number | null): Priority {
   if (p === 1) return 'high'
@@ -218,37 +298,50 @@ function adoStoryToTask(w: AdoWorkItem): Task {
     acceptanceCriteria: htmlToLines(w.acceptanceCriteria),
     priority: adoPriority(w.priority),
     points: w.storyPoints ?? undefined,
-    progress: 0,
     assignee: initials(w.assignedToName ?? ''),
     sprint: sprintNumber ? `SPR-${sprintNumber}` : undefined,
     tags: w.tags,
     status: 'queue',
-    comments: 0,
     externalState: w.state ?? undefined,
-    affectedSystem: w.state ?? undefined,
     parentId: w.parentId != null ? String(w.parentId) : undefined,
   }
 }
+
+const storyPoints = (items: AdoWorkItem[]) => items.reduce((sum, s) => sum + (s.storyPoints ?? 0), 0)
 
 function adoStoriesQueue(): QueueAdapter {
   return {
     source: 'stories',
     slug: ADO_QUEUE_SLUG,
+    // Closed stories are fetched too, only to report sprint progress; the
+    // board shows the rest.
     load: async (developer, sprint) => {
-      const params = new URLSearchParams({ assignedTo: developer, iteration: iterationFor(sprint) })
-      const stories = await adoGet<AdoWorkItem[]>(`/workitems?${params}`)
+      const params = new URLSearchParams({ assignedTo: developer, iteration: iterationFor(sprint), includeClosed: 'true' })
+      const all = await adoGet<AdoWorkItem[]>(`/workitems?${params}`)
+      const stories = all.filter(s => !ADO_CLOSED_STATES.has(s.state ?? ''))
+      const done = all.filter(s => s.state === ADO_DONE_STATE)
       const lanes: Record<string, Status> = {}
       for (const s of stories) {
         if (s.state === 'Active') lanes[String(s.adoId)] = 'today'
         else if (s.state === 'Blocked') lanes[String(s.adoId)] = 'blocked'
       }
-      return { items: stories.map(adoStoryToTask), claimedIds: [], lanes }
+      return {
+        items: stories.map(adoStoryToTask),
+        claimedIds: [],
+        lanes,
+        progress: {
+          done: done.length,
+          total: done.length + stories.length,
+          donePoints: storyPoints(done),
+          totalPoints: storyPoints(done) + storyPoints(stories),
+        },
+      }
     },
     move: async (task, _from, to) => {
       const state = ADO_LANE_STATES[to]
       if (!state || state === task.externalState) return
       await setAdoState(task.id, state)
-      return { externalState: state, affectedSystem: state }
+      return { externalState: state }
     },
     done: task => setAdoState(task.id, ADO_DONE_STATE).then(() => undefined),
     related: async task => {
@@ -320,13 +413,20 @@ function bridgeTask(item: BridgeItem, queue: string, fields: Pick<Task, 'ref' | 
     url: item.url ?? undefined,
     title: item.title,
     description: fields.notes ?? '',
-    progress: 0,
     assignee: '',
     tags: [],
     status: 'queue',
-    comments: 0,
     ...fields,
   }
+}
+
+// Done vs. committed work for the developer this sprint, for sources that can
+// report it (ADO can; the Notion queues only return open items).
+export interface QueueProgress {
+  done: number
+  total: number
+  donePoints: number
+  totalPoints: number
 }
 
 // A queue source the board knows how to load and act on. Notion queues go
@@ -336,7 +436,12 @@ export interface QueueAdapter {
   slug: string
   // Cards for the developer; claimedIds default to Todo when no lane is saved,
   // and `lanes` lets a source place cards from its own state (e.g. ADO Blocked).
-  load: (developer: string, sprint: Sprint | null) => Promise<{ items: Task[]; claimedIds: string[]; lanes?: Record<string, Status> }>
+  load: (developer: string, sprint: Sprint | null) => Promise<{
+    items: Task[]
+    claimedIds: string[]
+    lanes?: Record<string, Status>
+    progress?: QueueProgress
+  }>
   // Returns fields to merge into the card after a successful write.
   move?: (task: Task, from: Status, to: Status, developer: string) => Promise<Partial<Task> | void>
   done?: (task: Task, developer: string) => Promise<void>
@@ -426,7 +531,7 @@ export const QUEUES: QueueAdapter[] = [
         source: 'solarwinds',
         priority: selectPriority(displayValue(item, 'Priority')),
         notes: displayValue(item, 'Description'),
-        affectedSystem: displayValue(item, 'State') || undefined,
+        externalState: displayValue(item, 'State') || undefined,
         link: displayValue(item, 'Link') || undefined,
       })
     },

@@ -1,91 +1,103 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 
-import type { Initiative, Priority, QueueSource, Status, Task, TaskType } from './types'
+import type { Priority, QueueSource, Status, Task, TaskType } from './types'
 import {
   BRIDGE_REFRESH_MS, CALENDAR_LOOKAHEAD_DAYS, CONTEXT_REFRESH_MS, DEADLINE_TICKER_DAYS,
   ADO_STORIES_ENABLED, DEVELOPER_STORAGE_KEY, STALE_STANDUP_DAYS, TEST_DEVELOPERS,
   QUEUES, addDays, daysBetween, deadlineTickerText, fetchCurrentSprint, fetchDeadlines,
-  fetchStandup, formatSprintRange, loadDeveloper, loadLanes, localIsoDate, queueFor, shortDate, updateLanes,
+  fetchStandup, formatSprintRange, loadDeveloper, loadLanes, localIsoDate, plainText, queueFor, shortDate,
+  stripLinks, updateLanes,
 } from './bridge'
-import type { BriefLine, Deadline, RelatedEntity, Sprint, StandupBrief } from './bridge'
+import type { BriefLine, Deadline, QueueProgress, RelatedEntity, Sprint, StandupBrief } from './bridge'
 import BootScreen from './BootScreen'
 import type { BootStep, BootStepState } from './BootScreen'
+import { LinkedText, RichText } from './RichText'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const PRIORITY_CONFIG = {
-  critical: { label: 'CRIT', color: '#ff3355' },
-  high:     { label: 'HIGH', color: '#ffaa00' },
-  medium:   { label: 'MED',  color: '#00d4ff' },
-  low:      { label: 'LOW',  color: '#4a6a84' },
-  none:     { label: '—',    color: '#4a6a84' },
+// Colour is kept for urgency: medium and low stay neutral so CRIT and HIGH
+// stand out, and items without a priority show none.
+const PRIORITY_CONFIG: Record<Priority, { label: string; text: string; dot: string } | null> = {
+  critical: { label: 'CRIT', text: 'text-danger', dot: 'bg-danger shadow-[0_0_6px_var(--danger)]' },
+  high:     { label: 'HIGH', text: 'text-warn',   dot: 'bg-warn' },
+  medium:   { label: 'MED',  text: 'text-dim',    dot: 'bg-dim' },
+  low:      { label: 'LOW',  text: 'text-muted',  dot: 'bg-faint' },
+  none:     null,
 }
 
-const TYPE_CONFIG: Record<TaskType, { label: string; cls: string }> = {
-  story:    { label: 'STORY',    cls: 'tag-story' },
-  task:     { label: 'TASK',     cls: 'tag-task'  },
-  bug:      { label: 'BUG',      cls: 'tag-bug'   },
-  spike:    { label: 'SPIKE',    cls: 'tag-spike' },
-  alert:    { label: 'ALERT',    cls: 'tag-bug'   },
-  ticket:   { label: 'TICKET',   cls: 'tag-spike' },
-  incident: { label: 'INCIDENT', cls: 'tag-bug'   },
+const TYPE_LABELS: Record<TaskType, string> = {
+  story: 'STORY', task: 'TASK', bug: 'BUG', spike: 'SPIKE', alert: 'ALERT', ticket: 'TICKET', incident: 'INCIDENT',
 }
 
 const SOURCE_TABS = ([
-  { id: 'stories',    label: 'Stories',    color: '#a855f7' },
-  { id: 'tasks',      label: 'Tasks',      color: '#00d4ff' },
-  { id: 'pulse',      label: 'Pulse',      color: '#00ff88' },
-  { id: 'solarwinds', label: 'Solarwinds', color: '#ffaa00' },
-  { id: 'zendesk',    label: 'Zendesk',    color: '#f97316' },
-  { id: 'ads',        label: 'ADS',        color: '#60a5fa' },
-] satisfies { id: QueueSource; label: string; color: string }[])
+  { id: 'stories',    label: 'Stories' },
+  { id: 'tasks',      label: 'Tasks' },
+  { id: 'pulse',      label: 'Pulse' },
+  { id: 'solarwinds', label: 'Solarwinds' },
+  { id: 'zendesk',    label: 'Zendesk' },
+  { id: 'ads',        label: 'ADS' },
+] satisfies { id: QueueSource; label: string }[])
   // Only sources with a live queue: Zendesk and ADS have none yet, and Stories
   // is off while ado-bridge serves mock data.
   .filter(tab => QUEUES.some(q => q.source === tab.id))
 
-const ASSIGNEE_COLORS: Record<string, string> = {
-  JR: '#00d4ff', MK: '#a855f7', AR: '#00ff88',
+type Tone = 'accent' | 'ok' | 'warn' | 'danger' | 'neutral' | 'muted'
+const TONE_TEXT: Record<Tone, string> = {
+  accent: 'text-accent', ok: 'text-ok', warn: 'text-warn', danger: 'text-danger', neutral: 'text-fg', muted: 'text-muted',
+}
+const TONE_BG: Record<Tone, string> = {
+  accent: 'bg-accent', ok: 'bg-ok', warn: 'bg-warn', danger: 'bg-danger', neutral: 'bg-dim', muted: 'bg-faint',
 }
 
-const STATUS_COLORS = {
-  'on-track': '#00ff88',
-  'at-risk':  '#ffaa00',
-  'blocked':  '#ff3355',
-}
+const sourceSystem = (task: Task) => (task.source === 'stories' ? 'ADO' : 'Notion')
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
-function ProgressBar({ value, color = '#00d4ff' }: { value: number; color?: string }) {
+function ProgressBar({ value, tone = 'accent' }: { value: number; tone?: Tone }) {
   return (
-    <div className="progress-bar">
-      <div className="progress-fill" style={{ width: `${value}%`, background: `linear-gradient(90deg, ${color}, ${color}88)` }} />
+    <div className="h-[3px] overflow-hidden rounded-full bg-white/5">
+      <div className={`h-full rounded-full transition-[width] duration-300 ${TONE_BG[tone]}`} style={{ width: `${value}%` }} />
     </div>
   )
 }
 
-function Avatar({ initials, color = '#00d4ff' }: { initials: string; color?: string }) {
+function Avatar({ initials }: { initials: string }) {
+  if (!initials) return null
   return (
-    <div style={{ width: 22, height: 22, borderRadius: 2, background: `${color}22`, border: `1px solid ${color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'JetBrains Mono', fontSize: 9, fontWeight: 700, color, flexShrink: 0 }}>
+    <div className="flex size-6 shrink-0 items-center justify-center rounded-xs border border-accent/30 bg-accent/10 font-mono text-badge font-bold text-accent">
       {initials}
     </div>
   )
 }
 
-function Tag({ children, cls }: { children: React.ReactNode; cls: string }) {
-  return <span className={`tag ${cls}`}>{children}</span>
+function PriorityBadge({ priority }: { priority: Priority }) {
+  const p = PRIORITY_CONFIG[priority]
+  if (!p) return null
+  return (
+    <span className={`inline-flex items-center gap-1.5 font-mono text-meta font-bold ${p.text}`}>
+      <span className={`size-1.5 rounded-full ${p.dot}`} />
+      {p.label}
+    </span>
+  )
 }
 
-// ─── Task Card ────────────────────────────────────────────────────────────────
-
-function DoneButton({ onDone, size = 8 }: { onDone: () => void; size?: number }) {
+function DoneButton({ onDone, target }: { onDone: () => void; target: string }) {
   return (
     <button
       onClick={e => { e.stopPropagation(); onDone() }}
-      title="Mark done in Notion"
-      style={{ fontFamily: 'JetBrains Mono', fontSize: size, color: '#00ff88', background: 'rgba(0,255,136,0.08)', border: '1px solid rgba(0,255,136,0.3)', padding: '1px 5px', borderRadius: 2, cursor: 'pointer', letterSpacing: '0.08em' }}
+      title={`Mark done in ${target}`}
+      className="rounded-xs border border-ok/30 bg-ok/10 px-1.5 font-mono text-meta tracking-label text-ok hover:bg-ok/20"
     >✓ DONE</button>
   )
 }
+
+function CloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button onClick={onClose} title="Close (Esc)" className="btn-quiet flex size-6 items-center justify-center p-0">✕</button>
+  )
+}
+
+// ─── Task Card ────────────────────────────────────────────────────────────────
 
 function TaskCard({ task, onDragStart, compact = false, onClick, onDone }: {
   task: Task
@@ -94,54 +106,36 @@ function TaskCard({ task, onDragStart, compact = false, onClick, onDone }: {
   onClick?: () => void
   onDone?: () => void
 }) {
-  const pc = PRIORITY_CONFIG[task.priority]
-  const tc = TYPE_CONFIG[task.type]
   return (
     <div
       draggable
       onDragStart={e => onDragStart(e, task.id)}
       onClick={onClick}
-      className="task-card panel"
-      style={{ padding: compact ? '7px 9px' : '10px 12px', marginBottom: 5, borderColor: 'rgba(0,180,220,0.12)', cursor: 'grab' }}
+      className={`task-card panel mb-1.5 ${compact ? 'px-2.5 py-2' : 'px-3 py-2.5'}`}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-        <Tag cls={tc.cls}>{tc.label}</Tag>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>{task.ref ?? task.id}</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 5, alignItems: 'center' }}>
-          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: pc.color, fontWeight: 700 }}>
-            <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: pc.color, marginRight: 4, boxShadow: `0 0 4px ${pc.color}` }} />
-            {pc.label}
-          </span>
-          {task.points && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: 2, color: '#7aa0c0' }}>{task.points}pt</span>}
-          {task.severity && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, background: 'rgba(255,51,85,0.1)', padding: '1px 5px', borderRadius: 2, color: '#ff6680', border: '1px solid rgba(255,51,85,0.2)' }}>{task.severity}</span>}
-          {onDone && <DoneButton onDone={onDone} />}
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className="chip">{TYPE_LABELS[task.type]}</span>
+        <span className="ref">{task.ref ?? task.id}</span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <PriorityBadge priority={task.priority} />
+          {task.points != null && <span className="chip">{task.points}pt</span>}
+          {onDone && <DoneButton onDone={onDone} target={sourceSystem(task)} />}
         </div>
       </div>
 
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#e0f0ff', lineHeight: 1.4, marginBottom: compact ? 0 : 5 }}>{task.title}</div>
+      <div className={`text-body font-semibold text-ink ${compact ? '' : 'mb-1'}`}>{task.title}</div>
 
       {!compact && (
         <>
-          {task.notes && (
-            <div style={{ fontSize: 10, color: '#7aa0c0', lineHeight: 1.45, marginBottom: 5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{task.notes}</div>
-          )}
-          {task.progress > 0 && (
-            <div style={{ marginBottom: 5 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>PROGRESS</span>
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff' }}>{task.progress}%</span>
-              </div>
-              <ProgressBar value={task.progress} />
-            </div>
-          )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
-            {task.assignee && <Avatar initials={task.assignee} color={ASSIGNEE_COLORS[task.assignee] || '#00d4ff'} />}
-            {task.affectedSystem && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{task.affectedSystem}</span>}
-            {task.branch && !task.affectedSystem && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>⎇ {task.branch}</span>}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-              {task.standupAgeDays !== undefined && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: task.standupAgeDays > STALE_STANDUP_DAYS ? '#ffaa00' : '#4a6a84' }}>STANDUP {task.standupAgeDays}d</span>}
-              {task.comments > 0 && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>💬 {task.comments}</span>}
-              {task.sprint && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>{task.sprint}</span>}
+          {task.notes && <div className="mb-1.5 line-clamp-2 text-note text-dim">{plainText(task.notes)}</div>}
+          <div className="mt-1 flex items-center gap-1.5">
+            <Avatar initials={task.assignee} />
+            {task.externalState && <span className="chip">{task.externalState}</span>}
+            <div className="ml-auto flex items-center gap-2 font-mono text-meta text-muted">
+              {task.standupAgeDays !== undefined && (
+                <span className={task.standupAgeDays > STALE_STANDUP_DAYS ? 'text-warn' : ''}>STANDUP {task.standupAgeDays}d</span>
+              )}
+              {task.sprint && <span>{task.sprint}</span>}
             </div>
           </div>
         </>
@@ -153,132 +147,57 @@ function TaskCard({ task, onDragStart, compact = false, onClick, onDone }: {
 // ─── Detail Modal ─────────────────────────────────────────────────────────────
 
 function DetailModal({ task, onClose }: { task: Task; onClose: () => void }) {
-  const pc = PRIORITY_CONFIG[task.priority]
-  const tc = TYPE_CONFIG[task.type]
-  const srcTab = SOURCE_TABS.find(s => s.id === task.source)
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
-
+  const source = SOURCE_TABS.find(s => s.id === task.source)
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="panel hud-corner" style={{ width: 680, maxHeight: '82vh', display: 'flex', flexDirection: 'column', borderColor: 'rgba(0,212,255,0.35)', boxShadow: '0 0 60px rgba(0,212,255,0.12), 0 0 120px rgba(0,0,0,0.8)' }}>
-        {/* Modal header */}
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(0,212,255,0.06)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <Tag cls={tc.cls}>{tc.label}</Tag>
-          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84' }}>{task.ref ?? task.id}</span>
-          {srcTab && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, padding: '1px 6px', borderRadius: 2, background: `${srcTab.color}18`, border: `1px solid ${srcTab.color}44`, color: srcTab.color }}>via {srcTab.label}</span>}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: pc.color, fontWeight: 700 }}>
-              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: pc.color, marginRight: 5, boxShadow: `0 0 6px ${pc.color}` }} />
-              {pc.label}
-            </span>
-            {task.points && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, background: 'rgba(255,255,255,0.07)', padding: '2px 8px', borderRadius: 2, color: '#7aa0c0' }}>{task.points} pts</span>}
-            <button onClick={onClose} style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', width: 24, height: 24, borderRadius: 3, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
-          </div>
-        </div>
-
-        {/* Scrollable body */}
-        <div style={{ overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Title + assignee */}
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: '#e0f0ff', lineHeight: 1.3, marginBottom: 6 }}>{task.title}</div>
-              <div style={{ fontSize: 12, color: '#8ab0cc', lineHeight: 1.6 }}>{task.description}</div>
-            </div>
-            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-              <Avatar initials={task.assignee} color={ASSIGNEE_COLORS[task.assignee] || '#00d4ff'} />
-              <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>{task.assignee}</span>
-              {task.sprint && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>{task.sprint}</span>}
-            </div>
-          </div>
-
-          {/* Metadata row */}
-          {(task.affectedSystem || task.environment || task.reportedBy || task.branch) && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {task.affectedSystem && <MetaBadge label="SYSTEM" value={task.affectedSystem} />}
-              {task.environment && <MetaBadge label="ENV" value={task.environment} color="#ffaa00" />}
-              {task.reportedBy && <MetaBadge label="REPORTED BY" value={task.reportedBy} />}
-              {task.branch && <MetaBadge label="BRANCH" value={`⎇ ${task.branch}`} color="#00d4ff" />}
-              {task.severity && <MetaBadge label="SEVERITY" value={task.severity} color="#ff3355" />}
-            </div>
-          )}
-
-          {/* Progress if any */}
-          {task.progress > 0 && (
-            <div style={{ padding: '10px 12px', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.1)', borderRadius: 3 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', letterSpacing: '0.1em' }}>COMPLETION</span>
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 12, color: '#00d4ff', fontWeight: 700 }}>{task.progress}%</span>
-              </div>
-              <ProgressBar value={task.progress} />
-            </div>
-          )}
-
-          {/* Acceptance criteria */}
-          {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
-            <Section label="ACCEPTANCE CRITERIA">
-              {task.acceptanceCriteria.map((ac, i) => (
-                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0', borderBottom: i < task.acceptanceCriteria!.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                  <span style={{ color: '#00ff88', fontSize: 11, flexShrink: 0, marginTop: 1 }}>◇</span>
-                  <span style={{ fontSize: 12, color: '#c8dff0', lineHeight: 1.4 }}>{ac}</span>
-                </div>
-              ))}
-            </Section>
-          )}
-
-          {/* Subtasks */}
-          {task.subtasks && task.subtasks.length > 0 && (
-            <Section label={`SUBTASKS — ${task.subtasks.filter(s => s.done).length}/${task.subtasks.length}`}>
-              {task.subtasks.map((sub, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', background: 'rgba(255,255,255,0.02)', borderRadius: 2, border: '1px solid rgba(255,255,255,0.04)', marginBottom: 3 }}>
-                  <div style={{ width: 13, height: 13, borderRadius: 2, border: `1px solid ${sub.done ? '#00ff88' : '#4a6a84'}`, background: sub.done ? 'rgba(0,255,136,0.12)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    {sub.done && <span style={{ color: '#00ff88', fontSize: 9 }}>✓</span>}
-                  </div>
-                  <span style={{ fontSize: 12, color: sub.done ? '#4a6a84' : '#c8dff0', textDecoration: sub.done ? 'line-through' : 'none' }}>{sub.title}</span>
-                </div>
-              ))}
-            </Section>
-          )}
-
-          {/* Initiative */}
-          {task.initiative && <InitiativePanel initiative={task.initiative} />}
-
-          {/* Tags */}
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-            {task.tags.map(t => (
-              <span key={t} style={{ fontFamily: 'JetBrains Mono', fontSize: 9, padding: '2px 7px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, color: '#7aa0c0' }}>#{t}</span>
-            ))}
-          </div>
-
-          {/* Activity */}
-          {task.activity && task.activity.length > 0 && (
-            <Section label="ACTIVITY">
-              {task.activity.map((a, i) => (
-                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0', borderBottom: i < task.activity!.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                  <Avatar initials={a.user} color={ASSIGNEE_COLORS[a.user] || '#4a6a84'} />
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: 11, color: '#c8dff0' }}>{a.text}</span>
-                  </div>
-                  <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', flexShrink: 0 }}>{a.time}</span>
-                </div>
-              ))}
-            </Section>
-          )}
+    <Overlay onClose={onClose} className="max-h-[82vh] w-[720px]">
+      <div className="flex shrink-0 items-center gap-2.5 border-b border-accent/15 bg-accent/5 px-4 py-2.5">
+        <span className="chip">{TYPE_LABELS[task.type]}</span>
+        <span className="ref">{task.ref ?? task.id}</span>
+        {source && <span className="font-mono text-meta text-muted">via {source.label}</span>}
+        <div className="ml-auto flex items-center gap-2">
+          <PriorityBadge priority={task.priority} />
+          {task.points != null && <span className="chip">{task.points} pts</span>}
+          <CloseButton onClose={onClose} />
         </div>
       </div>
-    </div>
+
+      <div className="flex flex-col gap-4 overflow-y-auto p-4">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 text-display font-bold text-ink">{task.title}</div>
+            {task.description && <RichText text={task.description} className="text-read text-fg" />}
+          </div>
+          {(task.assignee || task.sprint) && (
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
+              <Avatar initials={task.assignee} />
+              {task.sprint && <span className="ref">{task.sprint}</span>}
+            </div>
+          )}
+        </div>
+
+        {task.externalState && (
+          <div className="flex flex-wrap gap-2">
+            <MetaBadge label="STATE" value={task.externalState} />
+          </div>
+        )}
+
+        {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
+          <Section label="ACCEPTANCE CRITERIA">
+            <AcceptanceCriteria items={task.acceptanceCriteria} />
+          </Section>
+        )}
+
+        <Tags tags={task.tags} />
+      </div>
+    </Overlay>
   )
 }
 
-function MetaBadge({ label, value, color = '#7aa0c0' }: { label: string; value: string; color?: string }) {
+function MetaBadge({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ padding: '4px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3 }}>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', letterSpacing: '0.1em', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color }}>{value}</div>
+    <div className="rounded-xs border border-line-soft bg-white/[0.04] px-2 py-1">
+      <div className="label text-badge">{label}</div>
+      <div className="font-mono text-note text-fg">{value}</div>
     </div>
   )
 }
@@ -286,28 +205,30 @@ function MetaBadge({ label, value, color = '#7aa0c0' }: { label: string; value: 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.12em', color: '#4a6a84', marginBottom: 8, paddingBottom: 5, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{label}</div>
+      <div className="label mb-2 border-b border-line-soft pb-1.5">{label}</div>
       {children}
     </div>
   )
 }
 
-function InitiativePanel({ initiative }: { initiative: Initiative }) {
-  const sc = STATUS_COLORS[initiative.status]
+function AcceptanceCriteria({ items }: { items: string[] }) {
   return (
-    <div style={{ padding: '10px 12px', background: 'rgba(0,0,0,0.3)', border: `1px solid ${sc}33`, borderRadius: 3 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.12em', color: '#4a6a84' }}>INITIATIVE</span>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: sc, background: `${sc}18`, padding: '1px 6px', borderRadius: 2 }}>{initiative.status.toUpperCase().replace('-', ' ')}</span>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', marginLeft: 'auto' }}>Due {initiative.dueDate}</span>
-      </div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#e0f0ff', marginBottom: 4 }}>{initiative.id} · {initiative.name}</div>
-      <div style={{ fontSize: 11, color: '#7aa0c0', lineHeight: 1.5, marginBottom: 8 }}>{initiative.goal}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>PROGRESS</span>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: sc }}>{initiative.progress}%</span>
-      </div>
-      <ProgressBar value={initiative.progress} color={sc} />
+    <>
+      {items.map((ac, i) => (
+        <div key={i} className="flex items-start gap-2 border-b border-line-soft py-1.5 last:border-b-0">
+          <span className="shrink-0 text-ok">◇</span>
+          <span className="text-body text-fg"><LinkedText text={ac} /></span>
+        </div>
+      ))}
+    </>
+  )
+}
+
+function Tags({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tags.map(t => <span key={t} className="chip">#{t}</span>)}
     </div>
   )
 }
@@ -336,24 +257,32 @@ function RelatedCard({ entity, onOpen }: { entity: RelatedEntity; onOpen: () => 
   const fields = (RELATION_FIELDS[entity.relation] ?? []).map(name => [name, prop(name)] as const).filter(([, v]) => v)
   const text = RELATION_TEXT_FIELDS.map(prop).find(Boolean) || entity.content || ''
   return (
-    <div onClick={entity.error ? undefined : onOpen} title={entity.error ? undefined : 'Click to expand'} style={{ padding: '8px 9px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.14)', borderRadius: 3, cursor: entity.error ? 'default' : 'zoom-in' }}>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.12em', color: '#4a6a84', marginBottom: 4 }}>{relationLabel(entity)}</div>
+    <div
+      onClick={entity.error ? undefined : onOpen}
+      title={entity.error ? undefined : 'Click to expand'}
+      className={`rounded-xs border border-accent/15 bg-black/30 px-2.5 py-2 ${entity.error ? '' : 'cursor-zoom-in hover:border-accent/35'}`}
+    >
+      <div className="label mb-1 text-badge">{relationLabel(entity)}</div>
       {entity.error ? (
-        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680' }}>Unavailable — {entity.error}</div>
+        <div className="font-mono text-meta text-danger-fg">Unavailable — {entity.error}</div>
       ) : (
         <>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#e0f0ff', lineHeight: 1.3, marginBottom: 5 }}>{entity.title}</div>
+          <div className="mb-1.5 text-body font-semibold leading-snug text-ink">{entity.title}</div>
           {fields.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 5 }}>
+            <div className="mb-1.5 flex flex-wrap gap-1">
               {fields.map(([name, value]) => (
-                <span key={name} style={{ fontFamily: 'JetBrains Mono', fontSize: 8, padding: '1px 5px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, color: '#9bbdd4' }}>
-                  <span style={{ color: '#4a6a84' }}>{name.toUpperCase()} </span>{value}
+                <span key={name} className="chip">
+                  <span className="mr-1 text-muted">{name.toUpperCase()}</span>{value}
                 </span>
               ))}
             </div>
           )}
-          {text && <div style={{ fontSize: 10, color: '#7aa0c0', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden', whiteSpace: 'pre-line' }}>{text}</div>}
-          {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-block', marginTop: 5, fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN {linkTarget(entity.url)} ↗</a>}
+          {text && <div className="line-clamp-5 whitespace-pre-line text-note text-dim">{stripLinks(text)}</div>}
+          {entity.url && (
+            <a href={entity.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="link mt-1.5 inline-block font-mono text-meta">
+              OPEN IN {linkTarget(entity.url)} ↗
+            </a>
+          )}
         </>
       )}
     </div>
@@ -362,14 +291,14 @@ function RelatedCard({ entity, onOpen }: { entity: RelatedEntity; onOpen: () => 
 
 function RelatedPanel({ related }: { related: RelatedEntity[] | 'loading' | { error: string } | undefined }) {
   if (related === undefined || related === 'loading') {
-    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>LOADING CONTEXT…</span>
+    return <span className="font-mono text-meta text-muted">LOADING CONTEXT…</span>
   }
   if (!Array.isArray(related)) {
-    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680' }}>{related.error}</span>
+    return <span className="font-mono text-meta text-danger-fg">{related.error}</span>
   }
   const linked = related.filter(r => !r.empty)
   if (linked.length === 0) {
-    return <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.6 }}>No linked initiative, issue, or parent</span>
+    return <span className="text-note text-muted">No linked initiative, issue, or parent</span>
   }
   return <RelatedCards linked={linked} />
 }
@@ -392,38 +321,43 @@ function RelatedModal({ entity, onClose }: { entity: RelatedEntity; onClose: () 
   const fields = props.filter(p => !RELATION_TEXT_FIELDS.includes(p.name))
   const content = (entity.content ?? '').split('\n').filter(l => !l.startsWith('[Sub-page:')).join('\n').trim()
   return (
-    <Overlay onClose={onClose}>
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(0,212,255,0.06)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.12em', color: '#00d4ff' }}>{relationLabel(entity)}</span>
-        {entity.url && <a href={entity.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#00d4ff', textDecoration: 'none' }}>OPEN IN {linkTarget(entity.url)} ↗</a>}
-        <button onClick={onClose} title="Close (Esc)" style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', width: 24, height: 24, borderRadius: 3, cursor: 'pointer' }}>✕</button>
+    <Overlay onClose={onClose} className="h-[80vh] w-[760px]">
+      <div className="flex shrink-0 items-center gap-2.5 border-b border-accent/15 bg-accent/5 px-4 py-2.5">
+        <span className="label text-accent">{relationLabel(entity)}</span>
+        {entity.url && (
+          <a href={entity.url} target="_blank" rel="noreferrer" className="link font-mono text-meta">OPEN IN {linkTarget(entity.url)} ↗</a>
+        )}
+        <span className="ml-auto" />
+        <CloseButton onClose={onClose} />
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14, zoom: 1.2 }}>
-        <div style={{ fontSize: 17, fontWeight: 700, color: '#e0f0ff', lineHeight: 1.3 }}>{entity.title}</div>
+      <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-3.5">
+        <div className="text-display font-bold text-ink">{entity.title}</div>
         {fields.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="flex flex-wrap gap-2">
             {fields.map(p => <MetaBadge key={p.name} label={p.name.toUpperCase()} value={p.value} />)}
           </div>
         )}
         {longText.map(p => (
           <Section key={p.name} label={p.name.toUpperCase()}>
-            <div style={{ fontSize: 12, color: '#c8dff0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{p.value}</div>
+            <RichText text={p.value} className="text-read text-fg" />
           </Section>
         ))}
         {content && (
           <Section label="PAGE CONTENT">
-            <div style={{ fontSize: 12, color: '#c8dff0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{content}</div>
+            <RichText text={content} className="text-read text-fg" />
           </Section>
         )}
         {entity.sub_pages && entity.sub_pages.length > 0 && (
           <Section label={`SUB-PAGES — ${entity.sub_pages.length}`}>
             {entity.sub_pages.map(sp => (
-              <a key={sp.id} href={notionPageUrl(sp.id)} target="_blank" rel="noreferrer" style={{ display: 'block', padding: '4px 0', fontSize: 12, color: '#00d4ff', textDecoration: 'none' }}>{sp.title || 'Untitled'} ↗</a>
+              <a key={sp.id} href={notionPageUrl(sp.id)} target="_blank" rel="noreferrer" className="link block py-1 text-read">
+                {sp.title || 'Untitled'} ↗
+              </a>
             ))}
           </Section>
         )}
         {!content && longText.length === 0 && (
-          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>No description or page content.</span>
+          <span className="text-body text-muted">No description or page content.</span>
         )}
       </div>
     </Overlay>
@@ -439,187 +373,70 @@ function WorkingSpace({ task, related, onClear, onDone, onDragStart }: {
 }) {
   if (!task) {
     return (
-      <div className="panel" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed', borderColor: 'rgba(0,212,255,0.18)', minHeight: 200 }}>
-        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: '#4a6a84', textAlign: 'center', letterSpacing: '0.1em' }}>
-          <div style={{ fontSize: 28, marginBottom: 10, opacity: 0.25 }}>◈</div>
-          DRAG ANY ITEM HERE<br />
-          <span style={{ fontSize: 9, opacity: 0.5 }}>TO BEGIN WORKING</span>
+      <div className="panel flex min-h-[200px] flex-1 items-center justify-center border-dashed border-accent/20">
+        <div className="text-center font-mono tracking-label text-muted">
+          <div className="mb-2.5 text-[28px] text-faint">◈</div>
+          <div className="text-body">DRAG ANY ITEM HERE</div>
+          <div className="text-meta">TO BEGIN WORKING</div>
         </div>
       </div>
     )
   }
 
-  const pc = PRIORITY_CONFIG[task.priority]
-  const tc = TYPE_CONFIG[task.type]
-  const doneSubs = task.subtasks?.filter(s => s.done).length ?? 0
-  const totalSubs = task.subtasks?.length ?? 0
-
   return (
-    <div className="panel hud-corner" style={{ flex: 1, display: 'flex', flexDirection: 'column', borderColor: 'rgba(0,212,255,0.28)', overflow: 'hidden' }}>
+    <div className="panel hud-corner flex flex-1 flex-col overflow-hidden border-accent/30">
       {/* Header */}
-      <div style={{ background: 'linear-gradient(90deg, rgba(0,212,255,0.1), transparent)', padding: '7px 12px', borderBottom: '1px solid rgba(0,212,255,0.15)', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#00ff88', boxShadow: '0 0 8px #00ff88', flexShrink: 0 }} className="pulse" />
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', color: '#00d4ff' }}>ACTIVE</span>
-        <Tag cls={tc.cls}>{tc.label}</Tag>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#4a6a84' }}>{task.ref ?? task.id}</span>
-        {task.url && <a href={task.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>{linkTarget(task.url)} ↗</a>}
-        {task.link && <a href={task.link} target="_blank" rel="noreferrer" style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', textDecoration: 'none' }}>TICKET ↗</a>}
-        <span style={{ marginLeft: 'auto' }} />
-        {onDone && <DoneButton onDone={onDone} size={9} />}
+      <div className="flex shrink-0 items-center gap-2 border-b border-accent/15 bg-linear-to-r from-accent/10 to-transparent px-3 py-2">
+        <span className="pulse size-2 shrink-0 rounded-full bg-ok shadow-[0_0_8px_var(--ok)]" />
+        <span className="font-mono text-meta font-bold tracking-label text-accent">ACTIVE</span>
+        <span className="chip">{TYPE_LABELS[task.type]}</span>
+        <span className="ref">{task.ref ?? task.id}</span>
+        {task.externalState && <span className="chip">{task.externalState}</span>}
+        {task.url && <a href={task.url} target="_blank" rel="noreferrer" className="link font-mono text-meta">{linkTarget(task.url)} ↗</a>}
+        {task.link && <a href={task.link} target="_blank" rel="noreferrer" className="link font-mono text-meta">TICKET ↗</a>}
+        <span className="ml-auto" />
+        {onDone && <DoneButton onDone={onDone} target={sourceSystem(task)} />}
         <button
           draggable
           onDragStart={e => onDragStart(e, task.id)}
           onClick={onClear}
-          style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 2, cursor: 'pointer', letterSpacing: '0.1em' }}
+          className="btn-quiet"
           title="Drag back to queue or click to clear"
         >RETURN ×</button>
       </div>
 
-      {/* Two-col body: task detail | initiative context */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Left: task details */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10, borderRight: '1px solid rgba(0,212,255,0.08)' }}>
+      {/* Two-col body: task detail | project context */}
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto border-r border-accent/10 px-4 py-3.5">
           <div>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#e0f0ff', lineHeight: 1.3, marginBottom: 4 }}>{task.title}</div>
-                <div style={{ fontSize: 11, color: '#7aa0c0', lineHeight: 1.5 }}>{task.description}</div>
+            <div className="mb-2 flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="mb-2 text-title font-bold text-ink">{task.title}</div>
+                {task.description && <RichText text={task.description} className="text-body text-fg" />}
               </div>
-              <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: pc.color, fontWeight: 700 }}>{pc.label}</span>
-                {task.points && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>{task.points}pt</span>}
-                {task.assignee && <Avatar initials={task.assignee} color={ASSIGNEE_COLORS[task.assignee] || '#00d4ff'} />}
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <PriorityBadge priority={task.priority} />
+                {task.points != null && <span className="ref">{task.points}pt</span>}
+                <Avatar initials={task.assignee} />
               </div>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {task.tags.map(t => (
-                <span key={t} style={{ fontFamily: 'JetBrains Mono', fontSize: 8, padding: '1px 5px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 2, color: '#7aa0c0' }}>#{t}</span>
-              ))}
-            </div>
+            <Tags tags={task.tags} />
           </div>
 
-          {task.progress > 0 && (
-            <div style={{ padding: '8px 10px', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.1)', borderRadius: 3 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', letterSpacing: '0.1em' }}>COMPLETION</span>
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: '#00d4ff', fontWeight: 700 }}>{task.progress}%</span>
-              </div>
-              <ProgressBar value={task.progress} />
-            </div>
-          )}
-
-          {task.subtasks && task.subtasks.length > 0 && (
-            <div>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.1em', color: '#4a6a84', marginBottom: 5 }}>SUBTASKS — {doneSubs}/{totalSubs}</div>
-              {task.subtasks.map((sub, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 7px', background: 'rgba(255,255,255,0.02)', borderRadius: 2, border: '1px solid rgba(255,255,255,0.04)', marginBottom: 3 }}>
-                  <div style={{ width: 11, height: 11, borderRadius: 2, border: `1px solid ${sub.done ? '#00ff88' : '#4a6a84'}`, background: sub.done ? 'rgba(0,255,136,0.12)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    {sub.done && <span style={{ color: '#00ff88', fontSize: 8 }}>✓</span>}
-                  </div>
-                  <span style={{ fontSize: 11, color: sub.done ? '#4a6a84' : '#c8dff0', textDecoration: sub.done ? 'line-through' : 'none' }}>{sub.title}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
           {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
-            <div>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.1em', color: '#4a6a84', marginBottom: 5 }}>ACCEPTANCE CRITERIA</div>
-              {task.acceptanceCriteria.map((ac, i) => (
-                <div key={i} style={{ display: 'flex', gap: 7, padding: '3px 0', fontSize: 11, color: '#c8dff0', lineHeight: 1.4 }}>
-                  <span style={{ color: '#00ff88', flexShrink: 0 }}>◇</span>{ac}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {task.branch && (
-            <div style={{ padding: '5px 9px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, fontFamily: 'JetBrains Mono', fontSize: 9, color: '#7aa0c0' }}>
-              <span style={{ color: '#4a6a84' }}>git checkout </span>{task.branch}
-            </div>
+            <Section label="ACCEPTANCE CRITERIA">
+              <AcceptanceCriteria items={task.acceptanceCriteria} />
+            </Section>
           )}
         </div>
 
-        {/* Right: initiative/project context */}
-        <div style={{ width: task.queue ? 250 : 200, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
-          <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.15em', color: '#4a6a84', paddingBottom: 6, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>PROJECT CONTEXT</div>
-
-          {task.queue ? (
-            <RelatedPanel related={related} />
-          ) : task.initiative ? (
-            <>
-              <div>
-                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', marginBottom: 4 }}>INITIATIVE</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#e0f0ff', lineHeight: 1.3, marginBottom: 3 }}>{task.initiative.name}</div>
-                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: STATUS_COLORS[task.initiative.status] }}>{task.initiative.id} · {task.initiative.status.toUpperCase().replace('-', ' ')}</div>
-              </div>
-              <div>
-                <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', marginBottom: 3 }}>GOAL</div>
-                <div style={{ fontSize: 10, color: '#7aa0c0', lineHeight: 1.5 }}>{task.initiative.goal}</div>
-              </div>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>INITIATIVE PROGRESS</span>
-                  <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: STATUS_COLORS[task.initiative.status] }}>{task.initiative.progress}%</span>
-                </div>
-                <ProgressBar value={task.initiative.progress} color={STATUS_COLORS[task.initiative.status]} />
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <div style={{ flex: 1, padding: '6px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 2 }}>
-                  <div style={{ fontFamily: 'JetBrains Mono', fontSize: 7, color: '#4a6a84', marginBottom: 2 }}>DUE</div>
-                  <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#c8dff0' }}>{task.initiative.dueDate}</div>
-                </div>
-                <div style={{ flex: 1, padding: '6px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 2 }}>
-                  <div style={{ fontFamily: 'JetBrains Mono', fontSize: 7, color: '#4a6a84', marginBottom: 2 }}>OWNER</div>
-                  <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: ASSIGNEE_COLORS[task.initiative.owner] || '#c8dff0' }}>{task.initiative.owner}</div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {task.affectedSystem && (
-                <ContextField label="AFFECTED SYSTEM" value={task.affectedSystem} color="#ffaa00" />
-              )}
-              {task.environment && (
-                <ContextField label="ENVIRONMENT" value={task.environment} color="#ffaa00" />
-              )}
-              {task.reportedBy && (
-                <ContextField label="REPORTED BY" value={task.reportedBy} />
-              )}
-              {task.severity && (
-                <ContextField label="SEVERITY" value={task.severity} color="#ff3355" />
-              )}
-              {!task.affectedSystem && !task.reportedBy && (
-                <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.5 }}>No initiative linked</span>
-              )}
-            </div>
-          )}
-
-          {task.activity && task.activity.length > 0 && (
-            <div>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', marginBottom: 6, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.06)' }}>RECENT ACTIVITY</div>
-              {task.activity.map((a, i) => (
-                <div key={i} style={{ marginBottom: 6 }}>
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 2 }}>
-                    <Avatar initials={a.user} color={ASSIGNEE_COLORS[a.user] || '#4a6a84'} />
-                    <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>{a.time}</span>
-                  </div>
-                  <div style={{ fontSize: 10, color: '#7aa0c0', lineHeight: 1.4, paddingLeft: 27 }}>{a.text}</div>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="flex w-[280px] shrink-0 flex-col gap-2.5 overflow-y-auto px-3 py-3.5">
+          <div className="label border-b border-line-soft pb-1.5">PROJECT CONTEXT</div>
+          {task.queue
+            ? <RelatedPanel related={related} />
+            : <span className="text-note text-muted">No linked initiative, issue, or parent</span>}
         </div>
       </div>
-    </div>
-  )
-}
-
-function ContextField({ label, value, color = '#c8dff0' }: { label: string; value: string; color?: string }) {
-  return (
-    <div style={{ padding: '6px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 2 }}>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 7, color: '#4a6a84', letterSpacing: '0.1em', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color }}>{value}</div>
     </div>
   )
 }
@@ -633,9 +450,10 @@ export default function App() {
   const [centerTab, setCenterTab] = useState<'brief' | 'calendar'>('brief')
   const [queueTab, setQueueTab] = useState<QueueSource>(SOURCE_TABS[0].id)
   const [modalTask, setModalTask] = useState<Task | null>(null)
-  const [time, setTime] = useState(new Date())
+  const today = useToday()
   const [bridgeLoading, setBridgeLoading] = useState(true)
   const [bridgeErrors, setBridgeErrors] = useState<Partial<Record<QueueSource, string>>>({})
+  const [progress, setProgress] = useState<Partial<Record<QueueSource, QueueProgress>>>({})
   const [actionError, setActionError] = useState<string | null>(null)
   const [sprint, setSprint] = useState<Sprint | null>(null)
   const [developer, setDeveloper] = useState(loadDeveloper)
@@ -651,6 +469,7 @@ export default function App() {
     try { localStorage.setItem(DEVELOPER_STORAGE_KEY, email) } catch { /* storage unavailable */ }
     const bridgeSources = new Set(QUEUES.map(q => q.source))
     setTasks(prev => prev.filter(t => !bridgeSources.has(t.source)))
+    setProgress({})
     setBridgeLoading(true)
     setBrief(null)
     setActionError(null)
@@ -659,11 +478,6 @@ export default function App() {
     setBooting(true)
     setDeveloper(email)
   }
-
-  useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 1000)
-    return () => clearInterval(t)
-  }, [])
 
   // Queues: rebuilt from the bridge on every refresh, with each item placed in
   // its saved lane (claimed Pulse items default to Todo).
@@ -699,6 +513,14 @@ export default function App() {
           }
           const fresh = r.value.items.map(task => ({ ...task, status: laneFor(task.id) }))
           next = [...next.filter(t => t.source !== q.source), ...fresh]
+        })
+        return next
+      })
+      setProgress(prev => {
+        const next = { ...prev }
+        QUEUES.forEach((q, i) => {
+          const r = results[i]
+          if (r.status === 'fulfilled') next[q.source] = r.value.progress
         })
         return next
       })
@@ -777,6 +599,11 @@ export default function App() {
       setTasks(prev => prev.filter(t => t.id !== task.id))
       updateLanes(developer, { [task.id]: null })
       setModalTask(m => (m?.id === task.id ? null : m))
+      // Count it as done straight away; the next refresh confirms it.
+      setProgress(prev => {
+        const p = prev[task.source]
+        return p ? { ...prev, [task.source]: { ...p, done: p.done + 1, donePoints: p.donePoints + (task.points ?? 0) } } : prev
+      })
     } catch (e) {
       setActionError(`Couldn't mark ${task.ref ?? task.title} done: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -805,16 +632,14 @@ export default function App() {
   const queueTasks = tasks.filter(t => t.status === 'queue' && t.source === queueTab)
   const todayTasks = tasks.filter(t => t.status === 'today')
   const blockedTasks = tasks.filter(t => t.status === 'blocked')
-
   const allQueueTasks = tasks.filter(t => t.status === 'queue')
-  const sprintProgress = 28
+  const countOf = (source: QueueSource) => tasks.filter(t => t.source === source).length
 
-  const today = localIsoDate(time)
-  const timeStr = time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-  const dateStr = `${shortDate(today)} · ${time.getFullYear()}`
-  const activeSrc = SOURCE_TABS.find(s => s.id === queueTab)!
   const sprintHeader = sprint ? [sprint.name.toUpperCase(), formatSprintRange(sprint)].filter(Boolean).join(' · ') : 'SPRINT —'
   const sprintDaysLeft = sprint?.end ? Math.max(0, daysBetween(today, sprint.end)) : null
+  const sprintLength = sprint?.start && sprint.end ? daysBetween(sprint.start, sprint.end) + 1 : null
+  const sprintDay = sprint?.start && sprintLength ? Math.min(sprintLength, Math.max(1, daysBetween(sprint.start, today) + 1)) : null
+  const storyProgress = progress.stories
 
   const briefData = brief && !('error' in brief) ? brief : null
   const tickerItems = [
@@ -839,7 +664,6 @@ export default function App() {
     { label: 'plotting deadlines & milestones', state: deadlinesStatus },
   ]
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
-  const countOf = (source: QueueSource) => tasks.filter(t => t.source === source).length
   const bootSummary = [
     briefData?.mode === 'brief' && plural(briefData.responsibilities.length, 'responsibility', 'responsibilities') + ' today',
     briefData?.mode === 'brief' && briefData.aging.length > 0 && `${briefData.aging.length} aging`,
@@ -869,10 +693,10 @@ export default function App() {
 
   const briefView = <BriefPanel brief={brief} tasks={tasks} onOpen={openMention} today={today} />
   const calendarView = (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
-      <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84' }}>{sprintHeader}</span>
-        {sprintDaysLeft !== null && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff' }}>{sprintDaysLeft} DAYS LEFT</span>}
+    <div className="flex-1 overflow-y-auto px-3 py-2">
+      <div className="mb-1.5 flex justify-between font-mono text-meta">
+        <span className="text-muted">{sprintHeader}</span>
+        {sprintDaysLeft !== null && <span className="text-accent">{sprintDaysLeft} DAYS LEFT</span>}
       </div>
       <CalendarList items={calendarItems} sprint={sprint} today={today} />
     </div>
@@ -880,27 +704,27 @@ export default function App() {
   const tickerView = <TickerList items={tickerItems} />
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#060b14', overflow: 'hidden', fontFamily: 'Inter, sans-serif' }}>
+    <div className="flex h-screen flex-col overflow-hidden bg-bg font-sans">
 
       {/* ── Header ── */}
-      <header style={{ height: 46, borderBottom: '1px solid rgba(0,212,255,0.15)', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 16, background: 'rgba(0,0,0,0.4)', flexShrink: 0, zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <div style={{ width: 28, height: 28, background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.4)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'JetBrains Mono', fontSize: 13, color: '#00d4ff', fontWeight: 700 }}>◈</div>
+      <header className="z-10 flex h-[52px] shrink-0 items-center gap-4 border-b border-line bg-black/40 px-4">
+        <div className="flex shrink-0 items-center gap-2.5">
+          <div className="flex size-8 items-center justify-center rounded-xs border border-accent/40 bg-accent/10 font-mono text-stat font-bold text-accent">◈</div>
           <div>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: '#e0f0ff' }}>DEV COMMAND CENTER</div>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', letterSpacing: '0.08em' }}>{sprintHeader}</div>
+            <div className="font-mono text-note font-bold tracking-label text-ink">DEV COMMAND CENTER</div>
+            <div className="font-mono text-meta text-muted">{sprintHeader}</div>
           </div>
         </div>
 
         {/* Ticker */}
-        <div className="ticker-wrap" onClick={() => setReader('ticker')} title="Click to read all team items and dates" style={{ flex: 1, overflow: 'hidden', margin: '0 12px', position: 'relative', cursor: 'zoom-in' }}>
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(90deg, rgba(6,11,20,1), transparent)', zIndex: 1, pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(270deg, rgba(6,11,20,1), transparent)', zIndex: 1, pointerEvents: 'none' }} />
-          <div ref={tickerRef} className="ticker-track" style={{ display: 'inline-flex', gap: 28, alignItems: 'center', animationDuration: `${tickerDuration}s` }}>
+        <div className="ticker-wrap relative mx-3 flex-1 cursor-zoom-in overflow-hidden" onClick={() => setReader('ticker')} title="Click to read all team items and dates">
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-1 w-5 bg-linear-to-r from-bg to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-1 w-5 bg-linear-to-l from-bg to-transparent" />
+          <div ref={tickerRef} className="ticker-track inline-flex items-center gap-7" style={{ animationDuration: `${tickerDuration}s` }}>
             {(tickerItems.length ? [...tickerItems, ...tickerItems] : [{ src: 'TEAM', text: 'No team items' }]).map((b, i) => (
-              <span key={i} style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#9bbdd4', whiteSpace: 'nowrap', letterSpacing: '0.04em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: '#00d4ff', fontSize: 9 }}>◆</span>
-                <span style={{ color: '#4a8ca8', fontSize: 8, background: 'rgba(0,212,255,0.08)', padding: '0 4px', borderRadius: 2 }}>{b.src}</span>
+              <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap text-note text-dim">
+                <span className="text-badge text-accent">◆</span>
+                <span className="rounded-xs bg-accent/10 px-1 font-mono text-badge text-muted">{b.src}</span>
                 {b.text}
               </span>
             ))}
@@ -912,68 +736,72 @@ export default function App() {
           value={developer}
           onChange={e => changeDeveloper(e.target.value)}
           title="Viewing as developer (testing only)"
-          style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: '#ffaa00', background: 'rgba(255,170,0,0.08)', border: '1px dashed rgba(255,170,0,0.4)', borderRadius: 3, padding: '3px 6px', flexShrink: 0, cursor: 'pointer' }}
+          className="shrink-0 rounded-xs border border-dashed border-warn/40 bg-warn/10 px-1.5 py-1 font-mono text-meta text-warn"
         >
-          {TEST_DEVELOPERS.map(d => <option key={d.email} value={d.email} style={{ background: '#060b14' }}>{d.name}</option>)}
+          {TEST_DEVELOPERS.map(d => <option key={d.email} value={d.email} className="bg-bg">{d.name}</option>)}
         </select>
 
         {/* Stats */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexShrink: 0 }}>
-          <Stat label="SPRINT" value={`${sprintProgress}%`} color="#00d4ff" />
-          <Stat label="TODAY" value={String(todayTasks.length)} color="#ffaa00" />
-          <Stat label="BLOCKED" value={String(blockedTasks.length)} color={blockedTasks.length > 0 ? '#ff3355' : '#4a6a84'} />
-          <div style={{ width: 1, height: 20, background: 'rgba(0,212,255,0.12)' }} />
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 13, color: '#00d4ff', fontWeight: 700 }}>{timeStr}</div>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>{dateStr}</div>
-          </div>
+        <div className="flex shrink-0 items-center gap-5">
+          <Stat label="SPRINT DAY" value={sprintDay && sprintLength ? `${sprintDay}/${sprintLength}` : '—'} tone="accent" />
+          <Stat label="TODAY" value={String(todayTasks.length)} tone="accent" />
+          <Stat label="BLOCKED" value={String(blockedTasks.length)} tone={blockedTasks.length > 0 ? 'danger' : 'muted'} />
+          <div className="h-6 w-px bg-accent/15" />
+          <Clock />
         </div>
       </header>
 
       {/* ── Main Grid ── */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '272px 1fr 216px', overflow: 'hidden' }}>
+      <div className="grid flex-1 grid-cols-[clamp(300px,21vw,360px)_minmax(0,1fr)_clamp(232px,16vw,300px)] overflow-hidden">
 
         {/* ── LEFT: Queue Panel ── */}
         <div
-          style={{ borderRight: '1px solid rgba(0,212,255,0.1)', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'all 0.15s' }}
-          className={dropTarget === 'queue' ? 'drop-active' : ''}
+          className={`flex flex-col overflow-hidden border-r border-line transition-all ${dropTarget === 'queue' ? 'drop-active' : ''}`}
           onDrop={e => handleDrop(e, 'queue')}
           onDragOver={e => handleDragOver(e, 'queue')}
           onDragLeave={handleDragLeave}
         >
           {/* Header */}
-          <div style={{ padding: '8px 10px 0', background: 'rgba(0,0,0,0.25)', flexShrink: 0, borderBottom: '1px solid rgba(0,212,255,0.1)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 7 }}>
-              <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', color: '#00d4ff' }}>QUEUES</span>
-              <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', marginLeft: 'auto' }}>{allQueueTasks.length} items</span>
+          <div className="shrink-0 border-b border-line bg-black/25 px-2.5 pt-2.5">
+            <div className="mb-2 flex items-center">
+              <span className="label font-bold text-accent">QUEUES</span>
+              <span className="ml-auto font-mono text-meta text-muted">{allQueueTasks.length} items</span>
             </div>
             {/* Source tabs */}
-            <div style={{ display: 'flex', gap: 0, overflowX: 'auto' }}>
-              {SOURCE_TABS.map(tab => (
-                <button key={tab.id} onClick={() => setQueueTab(tab.id)} style={{ fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.07em', padding: '5px 8px', border: 'none', borderBottom: `2px solid ${queueTab === tab.id ? tab.color : 'transparent'}`, background: queueTab === tab.id ? `${tab.color}10` : 'transparent', color: queueTab === tab.id ? tab.color : '#4a6a84', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, transition: 'all 0.12s' }}>
-                  {tab.label}
-                  {(() => { const n = tasks.filter(t => t.status === 'queue' && t.source === tab.id).length; return n > 0 ? <span style={{ marginLeft: 4, fontSize: 8, opacity: 0.7 }}>{n}</span> : null })()}
-                </button>
-              ))}
+            <div className="flex overflow-x-auto">
+              {SOURCE_TABS.map(tab => {
+                const n = tasks.filter(t => t.status === 'queue' && t.source === tab.id).length
+                const active = queueTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setQueueTab(tab.id)}
+                    className={`shrink-0 whitespace-nowrap border-b-2 px-2 py-1.5 text-note font-medium transition-colors ${active ? 'border-accent bg-accent/5 text-accent' : 'border-transparent text-muted hover:text-fg'}`}
+                  >
+                    {tab.label}
+                    {n > 0 && <span className="ml-1 font-mono text-badge">{n}</span>}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
           {/* Queue list */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+          <div className="flex-1 overflow-y-auto p-2">
             {actionError && (
-              <div onClick={() => setActionError(null)} title="Dismiss" style={{ marginBottom: 6, padding: '6px 8px', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680', background: 'rgba(255,51,85,0.08)', border: '1px solid rgba(255,51,85,0.25)', borderRadius: 2, cursor: 'pointer' }}>
+              <div onClick={() => setActionError(null)} title="Dismiss" className="mb-1.5 cursor-pointer rounded-xs border border-danger/25 bg-danger/10 px-2 py-1.5 font-mono text-meta text-danger-fg">
                 {actionError} ✕
               </div>
             )}
             {bridgeErrors[queueTab] && (
-              <div style={{ marginBottom: 6, padding: '6px 8px', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#ff6680', background: 'rgba(255,51,85,0.08)', border: '1px solid rgba(255,51,85,0.25)', borderRadius: 2 }}>
+              <div className="mb-1.5 rounded-xs border border-danger/25 bg-danger/10 px-2 py-1.5 font-mono text-meta text-danger-fg">
                 BRIDGE ERROR · {bridgeErrors[queueTab]}
               </div>
             )}
             {bridgeLoading && QUEUES.some(q => q.source === queueTab) && queueTasks.length === 0 ? (
-              <div style={{ padding: '20px 8px', textAlign: 'center', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>LOADING…</div>
+              <div className="px-2 py-5 text-center font-mono text-meta text-muted">LOADING…</div>
             ) : queueTasks.length === 0 ? (
-              <div style={{ padding: '20px 8px', textAlign: 'center', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84', opacity: 0.5 }}>NO ITEMS IN QUEUE</div>
+              <div className="px-2 py-5 text-center font-mono text-meta text-muted">NO ITEMS IN QUEUE</div>
             ) : (
               queueTasks.map(t => (
                 <TaskCard key={t.id} task={t} onDragStart={handleDragStart} onClick={() => setModalTask(t)} onDone={doneHandler(t)} />
@@ -983,50 +811,69 @@ export default function App() {
 
           {/* Drop-back indicator */}
           {dropTarget === 'queue' && (
-            <div style={{ padding: '8px 10px', borderTop: '1px solid rgba(0,212,255,0.3)', background: 'rgba(0,212,255,0.06)', fontFamily: 'JetBrains Mono', fontSize: 9, color: '#00d4ff', textAlign: 'center', letterSpacing: '0.1em' }}>↓ RETURN TO QUEUE</div>
+            <div className="border-t border-accent/30 bg-accent/5 px-2.5 py-2 text-center font-mono text-meta tracking-label text-accent">↓ RETURN TO QUEUE</div>
           )}
         </div>
 
         {/* ── CENTER ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Top row: Brief + Calendar + Metrics */}
-          <div style={{ height: 174, display: 'flex', borderBottom: '1px solid rgba(0,212,255,0.1)', flexShrink: 0 }}>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(0,212,255,0.08)', overflow: 'hidden' }}>
-              <div style={{ display: 'flex', borderBottom: '1px solid rgba(0,212,255,0.1)', flexShrink: 0 }}>
+        <div className="flex flex-col overflow-hidden">
+          {/* Top row: Brief + Calendar + Sprint */}
+          <div className="flex h-[clamp(200px,30vh,320px)] shrink-0 border-b border-line">
+            <div className="flex flex-1 flex-col overflow-hidden border-r border-accent/10">
+              <div className="flex shrink-0 border-b border-accent/10">
                 {(['brief', 'calendar'] as const).map(tab => (
-                  <button key={tab} onClick={() => setCenterTab(tab)} style={{ flex: 1, fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '7px', border: 'none', background: centerTab === tab ? 'rgba(0,212,255,0.07)' : 'transparent', color: centerTab === tab ? '#00d4ff' : '#4a6a84', cursor: 'pointer', borderBottom: centerTab === tab ? '2px solid #00d4ff' : '2px solid transparent' }}>
+                  <button
+                    key={tab}
+                    onClick={() => setCenterTab(tab)}
+                    className={`flex-1 border-b-2 p-2 font-mono text-meta tracking-label ${centerTab === tab ? 'border-accent bg-accent/5 text-accent' : 'border-transparent text-muted hover:text-fg'}`}
+                  >
                     {tab === 'brief' ? '◉ DAILY BRIEF' : '◈ SPRINT CALENDAR'}
                   </button>
                 ))}
-                <button onClick={() => setReader(centerTab)} title="Expand" style={{ fontFamily: 'JetBrains Mono', fontSize: 11, padding: '0 10px', border: 'none', borderLeft: '1px solid rgba(0,212,255,0.1)', background: 'transparent', color: '#4a6a84', cursor: 'pointer' }}>⤢</button>
+                <button onClick={() => setReader(centerTab)} title="Expand" className="border-l border-accent/10 px-3 text-body text-muted hover:text-accent">⤢</button>
               </div>
 
-              <div onClick={() => setReader(centerTab)} title="Click to expand" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', cursor: 'zoom-in' }}>
+              <div onClick={() => setReader(centerTab)} title="Click to expand" className="flex flex-1 cursor-zoom-in flex-col overflow-hidden">
                 {centerTab === 'brief' ? briefView : calendarView}
               </div>
             </div>
 
             {/* Sprint metrics */}
-            <div style={{ width: 174, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 9, flexShrink: 0 }}>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.15em', color: '#00d4ff', fontWeight: 700 }}>SPRINT VELOCITY</div>
-              <SprintMetric label="BURNDOWN" value={`${sprintProgress}%`} progress={sprintProgress} color="#00d4ff" />
-              {ADO_STORIES_ENABLED && <SprintMetric label="STORIES" value={`0/${tasks.filter(t => t.source === 'stories').length}`} progress={0} color="#a855f7" />}
-              <SprintMetric label="TASKS" value={`0/${tasks.filter(t => t.source === 'tasks').length}`} progress={0} color="#00ff88" />
-              <SprintMetric label="OPEN ALERTS" value={`${tasks.filter(t => ['pulse', 'solarwinds'].includes(t.source) && t.status === 'queue').length}`} progress={0} color="#ff3355" />            </div>
+            <div className="flex w-[212px] shrink-0 flex-col gap-3 px-3 py-2.5">
+              <div className="label font-bold text-accent">SPRINT</div>
+              <SprintMetric
+                label="TIME"
+                value={sprintDay && sprintLength ? `DAY ${sprintDay}/${sprintLength}` : '—'}
+                progress={sprintDay && sprintLength ? (sprintDay / sprintLength) * 100 : 0}
+                tone="accent"
+              />
+              {ADO_STORIES_ENABLED && (
+                <SprintMetric
+                  label="STORIES"
+                  title="Stories closed / committed this sprint · story points closed / committed"
+                  value={storyProgress
+                    ? `${storyProgress.done}/${storyProgress.total}${storyProgress.totalPoints ? ` · ${storyProgress.donePoints}/${storyProgress.totalPoints} PT` : ''}`
+                    : '—'}
+                  progress={storyProgress ? percent(storyProgress) : 0}
+                  tone="ok"
+                />
+              )}
+              <SprintMetric label="TASKS" value={`${countOf('tasks')} OPEN`} tone="neutral" />
+              <SprintMetric label="PULSE + TICKETS" value={`${countOf('pulse') + countOf('solarwinds')} OPEN`} tone="neutral" />
+            </div>
           </div>
 
           {/* Working Space */}
           <div
-            style={{ flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden', transition: 'all 0.15s' }}
-            className={dropTarget === 'working' ? 'drop-active' : ''}
+            className={`flex flex-1 flex-col gap-1.5 overflow-hidden p-2 transition-all ${dropTarget === 'working' ? 'drop-active' : ''}`}
             onDrop={e => handleDrop(e, 'working')}
             onDragOver={e => handleDragOver(e, 'working')}
             onDragLeave={handleDragLeave}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, letterSpacing: '0.15em', color: '#00d4ff', fontWeight: 700 }}>◈ WORKING SPACE</span>
-              {workingTask && <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: '#4a6a84' }}>— {workingTask.ref ?? workingTask.id}</span>}
-              <span style={{ marginLeft: 'auto', fontFamily: 'JetBrains Mono', fontSize: 8, color: dropTarget === 'working' ? '#00d4ff' : '#4a6a84' }}>DROP ITEM TO ACTIVATE</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="label font-bold text-accent">◈ WORKING SPACE</span>
+              {workingTask && <span className="ref">— {workingTask.ref ?? workingTask.id}</span>}
+              <span className={`ml-auto font-mono text-meta ${dropTarget === 'working' ? 'text-accent' : 'text-muted'}`}>DROP ITEM TO ACTIVATE</span>
             </div>
             <WorkingSpace
               task={workingTask}
@@ -1039,21 +886,20 @@ export default function App() {
         </div>
 
         {/* ── RIGHT: Today + Blocked ── */}
-        <div style={{ borderLeft: '1px solid rgba(0,212,255,0.1)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="flex flex-col overflow-hidden border-l border-line">
           {/* TODAY */}
           <div
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', borderBottom: '1px solid rgba(0,212,255,0.1)', transition: 'all 0.15s' }}
-            className={dropTarget === 'today' ? 'drop-active' : ''}
+            className={`flex flex-1 flex-col border-b border-line transition-all ${dropTarget === 'today' ? 'drop-active' : ''}`}
             onDrop={e => handleDrop(e, 'today')}
             onDragOver={e => handleDragOver(e, 'today')}
             onDragLeave={handleDragLeave}
           >
-            <div className="panel-header" style={{ flexShrink: 0 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ffaa00', boxShadow: '0 0 6px #ffaa00', flexShrink: 0 }} />
+            <div className="panel-header shrink-0">
+              <span className="size-1.5 shrink-0 rounded-full bg-accent" />
               TODO TODAY
-              <span style={{ marginLeft: 'auto', background: 'rgba(255,170,0,0.12)', color: '#ffaa00', padding: '1px 6px', borderRadius: 2, fontSize: 9 }}>{todayTasks.length}</span>
+              <span className="ml-auto rounded-xs bg-accent/10 px-1.5 text-badge text-accent">{todayTasks.length}</span>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 5 }}>
+            <div className="flex-1 overflow-y-auto p-1.5">
               {todayTasks.length === 0
                 ? <EmptyDrop label="DROP TASKS HERE" />
                 : todayTasks.map(t => <TaskCard key={t.id} task={t} onDragStart={handleDragStart} compact onClick={() => setModalTask(t)} onDone={doneHandler(t)} />)
@@ -1063,20 +909,19 @@ export default function App() {
 
           {/* BLOCKED */}
           <div
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', transition: 'all 0.15s' }}
-            className={dropTarget === 'blocked' ? 'drop-blocked-active' : ''}
+            className={`flex flex-1 flex-col transition-all ${dropTarget === 'blocked' ? 'drop-blocked-active' : ''}`}
             onDrop={e => handleDrop(e, 'blocked')}
             onDragOver={e => handleDragOver(e, 'blocked')}
             onDragLeave={handleDragLeave}
           >
-            <div className="panel-header" style={{ flexShrink: 0 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ff3355', boxShadow: '0 0 6px #ff3355', flexShrink: 0 }} className={blockedTasks.length > 0 ? 'pulse' : ''} />
+            <div className="panel-header shrink-0">
+              <span className={`size-1.5 shrink-0 rounded-full bg-danger shadow-[0_0_6px_var(--danger)] ${blockedTasks.length > 0 ? 'pulse' : ''}`} />
               BLOCKED
-              <span style={{ marginLeft: 'auto', background: 'rgba(255,51,85,0.12)', color: '#ff3355', padding: '1px 6px', borderRadius: 2, fontSize: 9 }}>{blockedTasks.length}</span>
+              <span className="ml-auto rounded-xs bg-danger/10 px-1.5 text-badge text-danger">{blockedTasks.length}</span>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 5 }}>
+            <div className="flex-1 overflow-y-auto p-1.5">
               {blockedTasks.length === 0
-                ? <EmptyDrop label="NO BLOCKERS" color="#ff3355" />
+                ? <EmptyDrop label="NO BLOCKERS" />
                 : blockedTasks.map(t => <TaskCard key={t.id} task={t} onDragStart={handleDragStart} compact onClick={() => setModalTask(t)} onDone={doneHandler(t)} />)
               }
             </div>
@@ -1111,9 +956,22 @@ export default function App() {
   )
 }
 
-// ─── Daily Brief ──────────────────────────────────────────────────────────────
+// Points when the stories have them, otherwise a count of stories.
+const percent = (p: QueueProgress) =>
+  p.totalPoints ? (p.donePoints / p.totalPoints) * 100 : p.total ? (p.done / p.total) * 100 : 0
 
-const monoLabel: React.CSSProperties = { fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.12em', color: '#4a6a84' }
+// The local date, re-checked every minute so date-based views roll over at
+// midnight without re-rendering the board every second.
+function useToday() {
+  const [today, setToday] = useState(() => localIsoDate())
+  useEffect(() => {
+    const t = setInterval(() => setToday(localIsoDate()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  return today
+}
+
+// ─── Daily Brief ──────────────────────────────────────────────────────────────
 
 function BriefPanel({ brief, tasks, onOpen, today }: {
   brief: StandupBrief | { error: string } | null
@@ -1121,23 +979,23 @@ function BriefPanel({ brief, tasks, onOpen, today }: {
   onOpen: (line: BriefLine) => void
   today: string
 }) {
-  const shell = (children: React.ReactNode) => <div style={{ flex: 1, overflowY: 'auto', padding: '6px 10px' }}>{children}</div>
-  if (!brief) return shell(<span style={monoLabel}>LOADING BRIEF…</span>)
-  if ('error' in brief) return shell(<span style={{ ...monoLabel, color: '#ff6680' }}>BRIDGE ERROR · {brief.error}</span>)
-  if (brief.mode === 'none' || !brief.date) return shell(<span style={monoLabel}>NO STANDUP BRIEF YET THIS SPRINT</span>)
+  const shell = (children: React.ReactNode) => <div className="flex-1 overflow-y-auto px-3 py-2">{children}</div>
+  if (!brief) return shell(<span className="label">LOADING BRIEF…</span>)
+  if ('error' in brief) return shell(<span className="label text-danger-fg">BRIDGE ERROR · {brief.error}</span>)
+  if (brief.mode === 'none' || !brief.date) return shell(<span className="label">NO STANDUP BRIEF YET THIS SPRINT</span>)
 
   const heading = `${shortDate(brief.date)} STANDUP · ${brief.mode === 'brief' ? 'MORNING BRIEF' : 'LEADERSHIP SUMMARY'}`
-  const Line = ({ line, index, color }: { line: BriefLine; index?: number; color: string }) => {
+  const Line = ({ line, index, tone }: { line: BriefLine; index?: number; tone: string }) => {
     const task = tasks.find(t => line.mentions.includes(t.id))
     return (
       <div
         onClick={task ? e => { e.stopPropagation(); onOpen(line) } : undefined}
-        style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: task ? 'pointer' : 'default' }}
+        className={`flex items-start gap-2 border-b border-line-soft py-1 ${task ? 'cursor-pointer hover:bg-white/[0.03]' : ''}`}
       >
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color, flexShrink: 0, marginTop: 2, minWidth: 10 }}>{index !== undefined ? `${index + 1}.` : '•'}</span>
-        <span style={{ fontSize: 10.5, color: '#c8dff0', lineHeight: 1.4 }}>
-          {line.text}
-          {task && <span style={{ marginLeft: 5, fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff' }}>{task.ref ?? ''} ↗</span>}
+        <span className={`mt-px min-w-4 shrink-0 font-mono text-meta ${tone}`}>{index !== undefined ? `${index + 1}.` : '•'}</span>
+        <span className="text-body text-fg">
+          <LinkedText text={line.text} />
+          {task && <span className="ml-1.5 whitespace-nowrap font-mono text-meta text-accent">{task.ref ?? ''} ↗</span>}
         </span>
       </div>
     )
@@ -1145,28 +1003,28 @@ function BriefPanel({ brief, tasks, onOpen, today }: {
 
   return shell(
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <span style={{ ...monoLabel, color: '#00d4ff' }}>{heading}</span>
-        {!brief.isToday && brief.date < today && <span style={{ ...monoLabel, color: '#ffaa00', marginLeft: 'auto' }}>TODAY'S NOT POSTED YET</span>}
+      <div className="mb-1 flex items-center gap-1.5">
+        <span className="label text-accent">{heading}</span>
+        {!brief.isToday && brief.date < today && <span className="label ml-auto text-warn">TODAY'S NOT POSTED YET</span>}
       </div>
       {brief.mode === 'brief' ? (
         <>
-          <div style={{ ...monoLabel, marginTop: 4 }}>YOUR RESPONSIBILITIES TODAY</div>
+          <div className="label mt-1.5">YOUR RESPONSIBILITIES TODAY</div>
           {brief.responsibilities.length === 0
-            ? <div style={{ fontSize: 10, color: '#4a6a84', padding: '3px 0' }}>None listed</div>
-            : brief.responsibilities.map((l, i) => <Line key={i} line={l} index={i} color="#00d4ff" />)}
+            ? <div className="py-1 text-body text-muted">None listed</div>
+            : brief.responsibilities.map((l, i) => <Line key={i} line={l} index={i} tone="text-accent" />)}
           {brief.aging.length > 0 && (
             <>
-              <div style={{ ...monoLabel, marginTop: 6, color: '#ffaa00' }}>AGING ITEMS</div>
-              {brief.aging.map((l, i) => <Line key={i} line={l} color="#ffaa00" />)}
+              <div className="label mt-2.5 text-warn">AGING ITEMS</div>
+              {brief.aging.map((l, i) => <Line key={i} line={l} tone="text-warn" />)}
             </>
           )}
         </>
       ) : (
         brief.summaries.map(s => (
-          <div key={s.developer} style={{ display: 'flex', gap: 7, alignItems: 'flex-start', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-            <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', background: 'rgba(0,212,255,0.08)', padding: '1px 5px', borderRadius: 2, flexShrink: 0, marginTop: 1 }}>{s.developer.toUpperCase()}</span>
-            <span style={{ fontSize: 10.5, color: '#c8dff0', lineHeight: 1.4 }}>{s.text}</span>
+          <div key={s.developer} className="flex items-start gap-2 border-b border-line-soft py-1.5">
+            <span className="mt-px shrink-0 rounded-xs bg-accent/10 px-1.5 font-mono text-meta text-accent">{s.developer.toUpperCase()}</span>
+            <span className="text-body text-fg"><LinkedText text={s.text} /></span>
           </div>
         ))
       )}
@@ -1190,18 +1048,18 @@ function TickerList({ items }: { items: { src: string; text: string }[] }) {
     { src: 'DATE', label: `DEADLINES IN THE NEXT ${DEADLINE_TICKER_DAYS} DAYS` },
   ]
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+    <div className="flex-1 overflow-y-auto px-3 py-2">
       {groups.map(g => {
         const rows = items.filter(i => i.src === g.src)
         return (
-          <div key={g.src} style={{ marginBottom: 10 }}>
-            <div style={{ ...monoLabel, marginBottom: 3 }}>{g.label}</div>
+          <div key={g.src} className="mb-3">
+            <div className="label mb-1">{g.label}</div>
             {rows.length === 0
-              ? <div style={{ fontSize: 10.5, color: '#4a6a84', padding: '3px 0' }}>None</div>
+              ? <div className="py-1 text-body text-muted">None</div>
               : rows.map((r, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6, padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#00d4ff', flexShrink: 0, marginTop: 2 }}>•</span>
-                  <span style={{ fontSize: 10.5, color: '#c8dff0', lineHeight: 1.4 }}>{r.text}</span>
+                <div key={i} className="flex gap-2 border-b border-line-soft py-1">
+                  <span className="shrink-0 font-mono text-meta text-accent">•</span>
+                  <span className="text-body text-fg"><LinkedText text={r.text} /></span>
                 </div>
               ))}
           </div>
@@ -1212,8 +1070,8 @@ function TickerList({ items }: { items: { src: string; text: string }[] }) {
 }
 
 // Full-screen dimmed overlay with a centered HUD panel; Esc or a click
-// outside closes it.
-function Overlay({ onClose, className, children }: { onClose: () => void; className?: string; children: React.ReactNode }) {
+// outside closes it. `className` sizes the panel.
+function Overlay({ onClose, className = '', children }: { onClose: () => void; className?: string; children: React.ReactNode }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
@@ -1221,8 +1079,11 @@ function Overlay({ onClose, className, children }: { onClose: () => void; classN
   }, [onClose])
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
-      <div onClick={e => e.stopPropagation()} className={`panel hud-corner ${className ?? ''}`} style={{ width: 760, maxWidth: 'calc(100vw - 32px)', height: '80vh', display: 'flex', flexDirection: 'column', borderColor: 'rgba(0,212,255,0.35)', boxShadow: '0 0 60px rgba(0,212,255,0.12), 0 0 120px rgba(0,0,0,0.8)' }}>
+    <div onClick={onClose} className="fixed inset-0 z-90 flex items-center justify-center bg-black/75 backdrop-blur-sm">
+      <div
+        onClick={e => e.stopPropagation()}
+        className={`panel hud-corner flex max-w-[calc(100vw-32px)] flex-col border-accent/35 shadow-[0_0_60px_rgba(0,212,255,0.12),0_0_120px_rgba(0,0,0,0.8)] ${className}`}
+      >
         {children}
       </div>
     </div>
@@ -1236,18 +1097,22 @@ function ReaderModal({ tab, onTab, onClose, views }: {
   views: Record<ReaderTab, React.ReactNode>
 }) {
   return (
-    <Overlay onClose={onClose} className="reader">
-        <div style={{ display: 'flex', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(0,212,255,0.04)', flexShrink: 0 }}>
-          {READER_TABS.map(t => (
-            <button key={t.id} onClick={() => onTab(t.id)} style={{ flex: 1, fontFamily: 'JetBrains Mono', fontSize: 10, letterSpacing: '0.12em', padding: '10px', border: 'none', background: tab === t.id ? 'rgba(0,212,255,0.08)' : 'transparent', color: tab === t.id ? '#00d4ff' : '#4a6a84', cursor: 'pointer', borderBottom: tab === t.id ? '2px solid #00d4ff' : '2px solid transparent' }}>
-              {t.label}
-            </button>
-          ))}
-          <button onClick={onClose} title="Close (Esc)" style={{ fontFamily: 'JetBrains Mono', fontSize: 12, padding: '0 14px', border: 'none', borderLeft: '1px solid rgba(0,212,255,0.1)', background: 'transparent', color: '#4a6a84', cursor: 'pointer' }}>✕</button>
-        </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '6px 10px', zoom: 1.35 }}>
-          {views[tab]}
-        </div>
+    <Overlay onClose={onClose} className="h-[80vh] w-[760px]">
+      <div className="flex shrink-0 border-b border-accent/15 bg-accent/5">
+        {READER_TABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => onTab(t.id)}
+            className={`flex-1 border-b-2 p-2.5 font-mono text-meta tracking-label ${tab === t.id ? 'border-accent bg-accent/10 text-accent' : 'border-transparent text-muted hover:text-fg'}`}
+          >
+            {t.label}
+          </button>
+        ))}
+        <button onClick={onClose} title="Close (Esc)" className="border-l border-accent/10 px-3.5 text-body text-muted hover:text-fg">✕</button>
+      </div>
+      <div className="flex flex-1 flex-col overflow-hidden px-2.5 py-1.5 [zoom:1.15]">
+        {views[tab]}
+      </div>
     </Overlay>
   )
 }
@@ -1255,7 +1120,7 @@ function ReaderModal({ tab, onTab, onClose, views }: {
 // ─── Sprint Calendar ──────────────────────────────────────────────────────────
 
 function CalendarList({ items, sprint, today }: { items: Deadline[]; sprint: Sprint | null; today: string }) {
-  if (items.length === 0) return <span style={monoLabel}>NO UPCOMING DEADLINES</span>
+  if (items.length === 0) return <span className="label">NO UPCOMING DEADLINES</span>
 
   const inSprint = (d: Deadline) => !!sprint?.end && d.start <= sprint.end
   const range = (d: Deadline) => (d.end && d.end !== d.start ? `${shortDate(d.start)} – ${shortDate(d.end)}` : shortDate(d.start))
@@ -1265,17 +1130,20 @@ function CalendarList({ items, sprint, today }: { items: Deadline[]; sprint: Spr
   const Row = ({ d }: { d: Deadline }) => {
     const active = d.start <= today
     return (
-      <div style={{ padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-          <span style={{ fontSize: 10.5, color: active ? '#e0f0ff' : '#c8dff0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</span>
-          <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: active ? '#00ff88' : '#7aa0c0', flexShrink: 0 }}>
+      <div className="border-b border-line-soft py-1">
+        <div className="flex items-baseline gap-2">
+          <span className={`flex-1 truncate text-body ${active ? 'text-ink' : 'text-fg'}`}>{d.title}</span>
+          <span className={`shrink-0 font-mono text-meta ${active ? 'text-ok' : 'text-muted'}`}>
             {range(d)}{!active && ` · ${daysBetween(today, d.start)}d`}
           </span>
         </div>
         {inSprint(d) && sprintLen > 0 && (
-          <div style={{ position: 'relative', height: 3, background: 'rgba(255,255,255,0.05)', borderRadius: 2, marginTop: 2 }}>
-            <div style={{ position: 'absolute', left: `${pct(today)}%`, top: -2, width: 1, height: 7, background: '#00d4ff' }} />
-            <div style={{ position: 'absolute', left: `${pct(d.start)}%`, width: `${Math.max(2, pct(addDays(d.end ?? d.start, 1)) - pct(d.start))}%`, height: 3, borderRadius: 2, background: active ? '#00ff88' : '#a855f7' }} />
+          <div className="relative mt-1 h-[3px] rounded-full bg-white/5">
+            <div className="absolute -top-0.5 h-[7px] w-px bg-accent" style={{ left: `${pct(today)}%` }} />
+            <div
+              className={`absolute h-[3px] rounded-full ${active ? 'bg-ok' : 'bg-accent/50'}`}
+              style={{ left: `${pct(d.start)}%`, width: `${Math.max(2, pct(addDays(d.end ?? d.start, 1)) - pct(d.start))}%` }}
+            />
           </div>
         )}
       </div>
@@ -1286,9 +1154,9 @@ function CalendarList({ items, sprint, today }: { items: Deadline[]; sprint: Spr
   const upcoming = items.filter(d => !inSprint(d))
   return (
     <>
-      {current.length > 0 && <div style={{ ...monoLabel, marginBottom: 2 }}>THIS SPRINT</div>}
+      {current.length > 0 && <div className="label mb-0.5">THIS SPRINT</div>}
       {current.map(d => <Row key={d.id} d={d} />)}
-      {upcoming.length > 0 && <div style={{ ...monoLabel, marginTop: 6, marginBottom: 2 }}>UPCOMING</div>}
+      {upcoming.length > 0 && <div className="label mb-0.5 mt-2">UPCOMING</div>}
       {upcoming.map(d => <Row key={d.id} d={d} />)}
     </>
   )
@@ -1296,31 +1164,48 @@ function CalendarList({ items, sprint, today }: { items: Deadline[]; sprint: Spr
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+function Stat({ label, value, tone }: { label: string; value: string; tone: Tone }) {
   return (
-    <div style={{ textAlign: 'right' }}>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 14, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: 8, color: '#4a6a84', letterSpacing: '0.1em', marginTop: 1 }}>{label}</div>
+    <div className="text-right">
+      <div className={`font-mono text-stat font-bold ${TONE_TEXT[tone]}`}>{value}</div>
+      <div className="mt-0.5 font-mono text-badge tracking-label text-muted">{label}</div>
     </div>
   )
 }
 
-function SprintMetric({ label, value, progress, color }: { label: string; value: string; progress: number; color: string }) {
+function SprintMetric({ label, value, progress, tone, title }: { label: string; value: string; progress?: number; tone: Tone; title?: string }) {
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 8, letterSpacing: '0.08em', color: '#4a6a84' }}>{label}</span>
-        <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color, fontWeight: 600 }}>{value}</span>
+    <div title={title}>
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="label">{label}</span>
+        <span className={`font-mono text-meta font-semibold ${TONE_TEXT[tone]}`}>{value}</span>
       </div>
-      <ProgressBar value={progress} color={color} />
+      {progress !== undefined && <ProgressBar value={progress} tone={tone} />}
     </div>
   )
 }
 
-function EmptyDrop({ label, color = '#4a6a84' }: { label: string; color?: string }) {
+function EmptyDrop({ label }: { label: string }) {
   return (
-    <div style={{ height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed rgba(255,255,255,0.07)', borderRadius: 3, margin: 4 }}>
-      <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9, color: color + '55', letterSpacing: '0.1em' }}>{label}</span>
+    <div className="m-1 flex h-14 items-center justify-center rounded-xs border border-dashed border-white/10">
+      <span className="font-mono text-meta tracking-label text-muted">{label}</span>
+    </div>
+  )
+}
+
+// Ticks every second on its own so the rest of the board doesn't re-render.
+function Clock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <div className="text-right">
+      <div className="font-mono text-stat font-bold text-accent">
+        {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+      </div>
+      <div className="mt-0.5 font-mono text-badge text-muted">{shortDate(localIsoDate(now))} · {now.getFullYear()}</div>
     </div>
   )
 }
