@@ -192,6 +192,55 @@ export function Tabs<T extends string>({ tabs, value, onChange, label, className
   )
 }
 
+// A small set of exclusive choices (a mode, a theme). It is one tab stop: arrow
+// keys move the choice, as they do in a native radio group.
+export function RadioGroup<T extends string>({ options, value, onChange, label, className }: {
+  options: { id: T; label: string; title?: string }[]
+  value: T
+  onChange: (id: T) => void
+  label: string
+  className?: string
+}) {
+  const refs = useRef(new Map<T, HTMLButtonElement>())
+  const move = (to: number) => {
+    const next = options[(to + options.length) % options.length]
+    onChange(next.id)
+    refs.current.get(next.id)?.focus()
+  }
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const at = options.findIndex(o => o.id === value)
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') move(at + 1)
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') move(at - 1)
+    else return
+    e.preventDefault()
+  }
+  return (
+    <div role="radiogroup" aria-label={label} onKeyDown={onKeyDown} className={cx('inline-flex overflow-hidden rounded-xs border border-line-soft', className)}>
+      {options.map(o => {
+        const checked = o.id === value
+        return (
+          <button
+            key={o.id}
+            ref={el => { if (el) refs.current.set(o.id, el); else refs.current.delete(o.id) }}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            tabIndex={checked ? 0 : -1}
+            title={o.title}
+            onClick={() => onChange(o.id)}
+            className={cx(
+              'border-r border-line-soft px-2 py-1 text-note font-medium last:border-r-0 compact:py-0.5 focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-focus',
+              checked ? 'bg-accent/15 text-accent' : 'text-muted hover:text-fg',
+            )}
+          >
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Notes, empty and error states ────────────────────────────────────────────
 
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {

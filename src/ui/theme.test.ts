@@ -2,26 +2,26 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
-  DEFAULT_PREFS, FORCE_DARK, SCAN_MIN_WIDTH, applyPrefs, applySavedPrefs, loadPrefs, resolveLayout, resolveTheme, savePrefs,
+  DEFAULT_PREFS, SCAN_MIN_WIDTH, applyPrefs, applySavedPrefs, loadPrefs, resolveLayout, resolveTheme, savePrefs,
 } from './theme'
 
 describe('prefs storage', () => {
   beforeEach(() => localStorage.clear())
 
   it('defaults to dark, comfortable and an automatic layout', () => {
-    expect(loadPrefs('a@x.com')).toEqual({ theme: 'dark', density: 'comfortable', layout: 'auto' })
+    expect(loadPrefs('a@x.com')).toEqual({ theme: 'dark', density: 'comfortable', layout: 'auto', hud: false })
   })
 
   it('saves per developer', () => {
-    savePrefs('a@x.com', { theme: 'light', density: 'compact', layout: 'flow' })
-    expect(loadPrefs('a@x.com')).toEqual({ theme: 'light', density: 'compact', layout: 'flow' })
+    savePrefs('a@x.com', { theme: 'light', density: 'compact', layout: 'flow', hud: true })
+    expect(loadPrefs('a@x.com')).toEqual({ theme: 'light', density: 'compact', layout: 'flow', hud: true })
     expect(loadPrefs('b@x.com')).toEqual(DEFAULT_PREFS)
     expect(localStorage.getItem('devDashboard.ui.a@x.com')).not.toBeNull()
   })
 
   it('falls back field by field on bad values', () => {
-    localStorage.setItem('devDashboard.ui.a@x.com', JSON.stringify({ theme: 'neon', density: 'compact', layout: 7 }))
-    expect(loadPrefs('a@x.com')).toEqual({ theme: 'dark', density: 'compact', layout: 'auto' })
+    localStorage.setItem('devDashboard.ui.a@x.com', JSON.stringify({ theme: 'neon', density: 'compact', layout: 7, hud: 'yes' }))
+    expect(loadPrefs('a@x.com')).toEqual({ theme: 'dark', density: 'compact', layout: 'auto', hud: false })
     localStorage.setItem('devDashboard.ui.a@x.com', '{nope')
     expect(loadPrefs('a@x.com')).toEqual(DEFAULT_PREFS)
     localStorage.setItem('devDashboard.ui.a@x.com', 'null')
@@ -53,21 +53,22 @@ describe('applying', () => {
     delete document.documentElement.dataset.density
   })
 
-  it('sets data-density, and data-theme (dark while the only layout is dark-only)', () => {
-    applyPrefs({ theme: 'light', density: 'compact', layout: 'auto' }, false)
+  it('sets data-theme, data-density and data-hud', () => {
+    applyPrefs({ theme: 'light', density: 'compact', layout: 'auto', hud: true }, false)
     expect(document.documentElement.dataset.density).toBe('compact')
-    expect(document.documentElement.dataset.theme).toBe(FORCE_DARK ? 'dark' : 'light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.dataset.hud).toBe('on')
   })
 
   it('applies to any root element it is given', () => {
     const root = document.createElement('div')
-    applyPrefs({ theme: 'dark', density: 'comfortable', layout: 'auto' }, true, root)
-    expect(root.dataset).toMatchObject({ theme: 'dark', density: 'comfortable' })
+    applyPrefs({ theme: 'dark', density: 'comfortable', layout: 'auto', hud: false }, true, root)
+    expect(root.dataset).toMatchObject({ theme: 'dark', density: 'comfortable', hud: 'off' })
   })
 
   it('applySavedPrefs reads the saved developer\'s preferences', () => {
     localStorage.setItem('devDashboard.developer', 'a@x.com')
-    savePrefs('a@x.com', { theme: 'dark', density: 'compact', layout: 'auto' })
+    savePrefs('a@x.com', { theme: 'dark', density: 'compact', layout: 'auto', hud: false })
     applySavedPrefs()
     expect(document.documentElement.dataset.density).toBe('compact')
   })

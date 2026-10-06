@@ -266,7 +266,8 @@
     position: relative;
     overflow: hidden;
   }
-  .panel::before {
+  /* The glowing top edge and corner brackets are the HUD ornaments (a preference). */
+  [data-hud='on'] .panel::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
@@ -322,18 +323,19 @@
   /* Draws the eye to the next plan item after one is done. */
   .row-flash { animation: row-flash 2.4s ease-out; }
 
-  /* HUD corner brackets */
-  .hud-corner::before,
-  .hud-corner::after {
+  /* HUD corner brackets, at the top corners of a panel. */
+  [data-hud='on'] .panel::after {
     content: '';
     position: absolute;
-    width: 10px; height: 10px;
-    border-color: var(--accent);
-    border-style: solid;
+    inset: 0;
+    pointer-events: none;
     opacity: 0.5;
+    background:
+      linear-gradient(var(--accent), var(--accent)) top left / 10px 1px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) top left / 1px 10px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) top right / 10px 1px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) top right / 1px 10px no-repeat;
   }
-  .hud-corner::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
-  .hud-corner::after  { top: -1px; right: -1px; border-width: 1px 1px 0 0; }
 }
 
 /* Boot screen: a darker CRT with scanlines, a vignette and phosphor glow. */

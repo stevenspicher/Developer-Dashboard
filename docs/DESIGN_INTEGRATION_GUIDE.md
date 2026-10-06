@@ -671,6 +671,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 
 ### Phase 6: header, mode switcher, theme, density, persistence
 
+**Status (2026-10-06): built.** `src/ui/prefs.tsx` (`PrefsProvider`, `usePrefs`: the saved look for the developer being viewed, applied to `<html>` and saved on every change), `src/ui/LookControls.tsx` (`ModeSwitcher`, `LookMenu`), a `RadioGroup` in `atoms.tsx`, and `hud` added to the saved preferences in `theme.ts` (`FORCE_DARK` is gone). `App.tsx` now shows the developer's layout; `/?ui=scan`, `/?ui=flow` and `/?ui=classic` still name one until a layout is picked in the header (classic stays dark). Differences from the plan above: the switcher has three choices, Auto, Scan and Flow, because Auto (by window width) has to be reachable again once a layout is chosen; theme, density and the HUD switch live in a "Look" menu rather than the bar. The HUD ornaments (a glowing top edge and corner brackets on panels) are now off by default and switched by `data-hud` on `<html>`. Under 1100px the header folds Planned and Blocked into one chip and the clock to the time. Checked in the browser: switching layouts with a working item and an unsaved note (the note survives), theme and HUD changes saved under `devDashboard.ui.<email>`, the narrow header.
+
 - **Files:** `src/ui/Header.tsx`, `src/ui/ModeSwitcher.tsx`, `src/App.tsx`.
 - **Build:**
   - Header: brand; sprint line from data; switcher (Scan, Flow; theme Dark/Light/System; density); PLANNED (open entries), BLOCKED; TEMP developer switcher (kept visibly temporary); clock.

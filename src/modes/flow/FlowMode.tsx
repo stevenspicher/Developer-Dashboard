@@ -23,7 +23,6 @@ import { QueueDrawer } from '../../ui/QueueDrawer'
 import { BriefView, CalendarView, Reader, TickerView } from '../../ui/Reader'
 import { ENTRY_DRAG, PlanListRow, ReviewListRow, TaskListRow, reviewAge, STALE_REVIEW_DAYS } from '../../ui/rows'
 import type { Handlers } from '../../ui/rows'
-import { ThemeControls, useLook } from '../../ui/ThemeControls'
 import { Toast } from '../../ui/Toast'
 import { useMediaQuery } from '../../ui/useMediaQuery'
 import { EntryPane } from '../scan/panes'
@@ -94,7 +93,6 @@ export default function FlowMode() {
     setReader, closeReader, undoToast, dismissToast, finishBoot,
   } = board
 
-  const look = useLook()
   const wide = useMediaQuery('(min-width: 900px)')
   const [expanded, setExpanded] = useState<string | null>(null) // a plan entry opened in place
   const [drawer, setDrawer] = useState(false)
@@ -239,7 +237,6 @@ export default function FlowMode() {
           sprintDay={sprintDay && sprintLength ? `${sprintDay}/${sprintLength}` : null}
           planned={openEntries}
           blocked={blockedTasks.length}
-          extra={<ThemeControls look={look} />}
         />
 
         <main className="min-h-0 flex-1 overflow-y-auto">

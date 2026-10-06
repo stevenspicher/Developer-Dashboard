@@ -20,7 +20,6 @@ import { DetailModal } from '../../ui/DetailModal'
 import { BriefView, CalendarView, Reader, TickerView } from '../../ui/Reader'
 import { PlanListRow, ReviewListRow, TaskListRow, TeamListRow } from '../../ui/rows'
 import type { Handlers } from '../../ui/rows'
-import { ThemeControls, useLook } from '../../ui/ThemeControls'
 import { Toast } from '../../ui/Toast'
 import { useMediaQuery } from '../../ui/useMediaQuery'
 import { EmptyPane, EntryPane, ReviewPane, TeamPane } from './panes'
@@ -45,7 +44,6 @@ export default function ScanMode() {
     linkEntry, unlinkEntry, closePicker, setReader, closeReader, undoToast, dismissToast, finishBoot, startTask, addToPlan,
   } = board
 
-  const look = useLook()
   const wide = useMediaQuery('(min-width: 900px)')
   const [filter, setFilter] = useState<Filter>('plan')
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -259,7 +257,6 @@ export default function ScanMode() {
           sprintDay={sprintDay && sprintLength ? `${sprintDay}/${sprintLength}` : null}
           planned={openEntries}
           blocked={blockedTasks.length}
-          extra={<ThemeControls look={look} />}
         />
 
         <div className="flex min-h-0 flex-1">

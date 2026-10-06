@@ -1,17 +1,17 @@
 import { TEST_DEVELOPERS } from '../bridge'
 import { Clock } from './Clock'
+import { LookMenu, ModeSwitcher } from './LookControls'
 
-// The top bar of the list-and-pane layouts: the app and sprint, a temporary
-// developer switcher, the day's counts, and the clock. `extra` is for controls
-// a layout adds (the theme toggles, until the real picker exists).
-export function Header({ sprintLine, developer, onDeveloper, sprintDay, planned, blocked, extra }: {
+// The top bar of Scan and Flow: the app and sprint, the layout switcher and look
+// menu, a temporary developer switcher, the day's counts, and the clock. Under
+// 1100px the counts shrink to one chip and the clock to the time.
+export function Header({ sprintLine, developer, onDeveloper, sprintDay, planned, blocked }: {
   sprintLine: string
   developer: string
   onDeveloper: (email: string) => void
   sprintDay: string | null
   planned: number
   blocked: number
-  extra?: React.ReactNode
 }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-4 border-b border-line bg-surface px-4">
@@ -20,7 +20,8 @@ export function Header({ sprintLine, developer, onDeveloper, sprintDay, planned,
         <div className="truncate font-mono text-meta text-muted">{sprintLine}</div>
       </div>
       <div className="flex-1" />
-      {extra && <div className="hidden min-[1100px]:block">{extra}</div>}
+      <ModeSwitcher />
+      <LookMenu />
       {/* TEMP: developer switcher for testing, until there is a real login. */}
       <select
         value={developer}
@@ -31,12 +32,16 @@ export function Header({ sprintLine, developer, onDeveloper, sprintDay, planned,
       >
         {TEST_DEVELOPERS.map(d => <option key={d.email} value={d.email} className="bg-bg text-fg">{d.name}</option>)}
       </select>
-      <dl className="flex shrink-0 items-center gap-4">
+      <div className="shrink-0 font-mono text-meta text-muted min-[1100px]:hidden" title="Planned and blocked">
+        {planned} planned{blocked > 0 && <> · <span className="text-danger-fg">{blocked} blocked</span></>}
+      </div>
+      <dl className="hidden shrink-0 items-center gap-4 min-[1100px]:flex">
         {sprintDay && <Stat label="Sprint day" value={sprintDay} />}
         <Stat label="Planned" value={String(planned)} />
         <Stat label="Blocked" value={String(blocked)} tone={blocked > 0 ? 'danger' : 'muted'} />
       </dl>
-      <Clock />
+      <div className="hidden min-[1100px]:block"><Clock /></div>
+      <div className="min-[1100px]:hidden"><Clock showDate={false} /></div>
     </header>
   )
 }
