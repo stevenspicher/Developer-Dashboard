@@ -13,9 +13,13 @@ import { ProjectContext } from './ProjectContext'
 // Everything needed to finish an item, in one place: a header, an action bar
 // that follows the item's lane, then the description, checklist and notes with
 // dev links, project context and linked items beside them (below them when the
-// pane is narrow). Render it with `key={task.id}` so one item's notes and
+// pane is narrow). `layout` says where it sits: 'pane' fills its parent and
+// scrolls inside it; 'flow' grows with its content inside a page that scrolls;
+// 'compact' is 'flow' with one column, for expanding a row in place. Render it with `key={task.id}` so one item's notes and
 // ticks can't carry over to the next.
-export function CockpitPane({ task, sourceLabel, planned, working = false, doneTarget, handlers, onReturnDragStart, onClose }: {
+export type CockpitLayout = 'pane' | 'flow' | 'compact'
+
+export function CockpitPane({ task, sourceLabel, planned, working = false, doneTarget, handlers, onReturnDragStart, onClose, layout = 'pane' }: {
   task: Task
   sourceLabel?: string
   planned: boolean
@@ -26,11 +30,12 @@ export function CockpitPane({ task, sourceLabel, planned, working = false, doneT
   // Makes the Return button draggable, so the item can be dropped back in the queue.
   onReturnDragStart?: (e: React.DragEvent) => void
   onClose?: () => void
+  layout?: CockpitLayout
 }) {
   const { actions, inPlan } = laneActions(task, { planned, canDone: doneTarget !== null && !!handlers.done })
 
   return (
-    <div className="@container flex min-h-0 flex-1 flex-col">
+    <div className={`@container flex flex-col ${layout === 'pane' ? 'min-h-0 flex-1' : ''}`}>
       <header className="shrink-0 border-b border-line px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           {working && (
@@ -76,8 +81,8 @@ export function CockpitPane({ task, sourceLabel, planned, working = false, doneT
         {inPlan && <Chip>In today's plan</Chip>}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="grid grid-cols-1 gap-x-6 gap-y-5 p-4 @2xl:grid-cols-[minmax(0,1fr)_280px]">
+      <div className={layout === 'pane' ? 'min-h-0 flex-1 overflow-y-auto' : ''}>
+        <div className={`grid grid-cols-1 gap-x-6 gap-y-5 p-4 ${layout === 'compact' ? '' : '@2xl:grid-cols-[minmax(0,1fr)_280px]'}`}>
           <div className="flex min-w-0 flex-col gap-5">
             <div>
               <h2 className="mb-2 text-title font-bold text-ink">{task.title}</h2>

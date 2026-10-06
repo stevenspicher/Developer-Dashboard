@@ -135,12 +135,16 @@ export function Checkbox({ checked, onChange, label, disabled, title }: {
 }
 
 // A row of tabs. Left and right arrows (and Home and End) move between them.
-export function Tabs<T extends string>({ tabs, value, onChange, label, className }: {
+export function Tabs<T extends string>({ tabs, value, onChange, label, className, tabProps, dense }: {
   tabs: { id: T; label: string; count?: number }[]
   value: T
   onChange: (id: T) => void
   label: string
   className?: string
+  // Tighter tabs, for a narrow list.
+  dense?: boolean
+  // Extra props for one tab, e.g. drop handlers.
+  tabProps?: (id: T) => React.HTMLAttributes<HTMLButtonElement>
 }) {
   const refs = useRef(new Map<T, HTMLButtonElement>())
   const move = (to: number) => {
@@ -159,21 +163,24 @@ export function Tabs<T extends string>({ tabs, value, onChange, label, className
     e.preventDefault()
   }
   return (
-    <div role="tablist" aria-label={label} onKeyDown={onKeyDown} className={cx('flex gap-1 border-b border-line', className)}>
+    <div role="tablist" aria-label={label} onKeyDown={onKeyDown} className={cx('flex border-b border-line', dense ? 'gap-0' : 'gap-1', className)}>
       {tabs.map(t => {
         const selected = t.id === value
         return (
           <button
             key={t.id}
             ref={el => { if (el) refs.current.set(t.id, el); else refs.current.delete(t.id) }}
+            {...tabProps?.(t.id)}
             type="button"
             role="tab"
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={cx(
-              '-mb-px border-b-2 px-2.5 py-1.5 text-note font-medium compact:py-1 focus-visible:outline-1 focus-visible:outline-focus',
+              '-mb-px border-b-2 py-1.5 text-note font-medium compact:py-1 focus-visible:outline-1 focus-visible:outline-focus',
+              dense ? 'px-1.5' : 'px-2.5',
               selected ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-fg',
+              t.count !== undefined && 'whitespace-nowrap',
             )}
           >
             {t.label}

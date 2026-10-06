@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
@@ -15,18 +15,23 @@ export function Overlay({ onClose, label, className = '', children }: {
   const panel = useRef<HTMLDivElement>(null)
   const close = useRef(onClose)
   close.current = onClose
+  // What had focus when it opened, read while rendering: an autoFocus input inside
+  // takes focus before any effect runs.
+  const [opener] = useState(() => (typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null)))
 
   useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null
-    const first = panel.current?.querySelector<HTMLElement>(FOCUSABLE) ?? panel.current
-    first?.focus()
+    // Something inside may already have focus (an autoFocus input): leave it there.
+    if (!panel.current?.contains(document.activeElement)) {
+      const first = panel.current?.querySelector<HTMLElement>(FOCUSABLE) ?? panel.current
+      first?.focus()
+    }
     const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') close.current() }
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
       if (opener?.isConnected) opener.focus()
     }
-  }, [])
+  }, [opener])
 
   // Keeps Tab and Shift+Tab inside the panel.
   const trap = (e: KeyboardEvent<HTMLDivElement>) => {

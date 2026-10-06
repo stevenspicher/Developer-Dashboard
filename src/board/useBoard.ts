@@ -583,6 +583,7 @@ export function useBoard() {
   const closePicker = () => setLinkFor(null)
   const closeReader = () => setReader(null)
   const undoToast = () => { toast?.undo?.(); setToast(null) }
+  const dismissToast = () => setToast(null)
   const finishBoot = () => setBooting(false)
 
   return {
@@ -598,7 +599,7 @@ export function useBoard() {
     actions, cockpit, doneHandler, startTask, addToPlan, moveTask, changeDeveloper, openMention,
     handleDragStart, handleDragOver, handleDragLeave, handleDrop,
     setQueueTab, setModalTask, closeDetail, startFromDetail, addFromDetail, backToMyDay, returnToPlan,
-    dismissError, linkEntry, unlinkEntry, closePicker, setReader, closeReader, undoToast, finishBoot,
+    dismissError, linkEntry, unlinkEntry, closePicker, setReader, closeReader, undoToast, dismissToast, finishBoot,
   }
 }
 

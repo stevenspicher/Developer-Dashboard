@@ -14,6 +14,10 @@ npm run dev        # http://localhost:8443, proxies /bridge → localhost:3100, 
 Point the proxy elsewhere with `NOTION_BRIDGE_URL` / `ADO_BRIDGE_URL`.
 ADO User Stories are on by default and need ado-bridge connected to Azure DevOps (`ADO_PAT` in its `.env`). Start with `VITE_ADO_STORIES=false` to hide them.
 
+## Layouts
+
+The current layout is the default. `/?ui=scan` shows the new Scan layout (a list and a pane) and `/?ui=flow` the new Flow layout (the day as one column with a queues drawer). Both are still being built.
+
 ## Tests
 
 ```bash

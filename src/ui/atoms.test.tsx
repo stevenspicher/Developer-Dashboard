@@ -193,6 +193,17 @@ describe('Overlay', () => {
     ui.unmount()
   })
 
+  it('leaves focus on an element that already took it, such as an autoFocus input', () => {
+    const ui = mount(
+      <Overlay label="Example" onClose={() => {}}>
+        <button id="close">Close</button>
+        <input id="filter" autoFocus aria-label="Filter" />
+      </Overlay>,
+    )
+    expect(document.activeElement?.id).toBe('filter')
+    ui.unmount()
+  })
+
   it('closes on Esc and on a click outside, but not on a click inside', () => {
     const onClose = vi.fn()
     const ui = mount(<Harness onClose={onClose} />)
@@ -213,6 +224,26 @@ describe('Overlay', () => {
     expect(document.activeElement?.id).toBe('first')
     key(dialog, 'Tab', { shiftKey: true })
     expect(document.activeElement?.id).toBe('last')
+    ui.unmount()
+  })
+
+  it('gives focus back to what opened it even when the overlay has an autoFocus input', () => {
+    function Opener() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button id="opener" onClick={() => setOpen(true)}>Open</button>
+          {open && <Overlay label="Example" onClose={() => setOpen(false)}><input id="filter" autoFocus aria-label="Filter" /></Overlay>}
+        </>
+      )
+    }
+    const ui = mount(<Opener />)
+    const opener = document.getElementById('opener')!
+    opener.focus()
+    click(opener)
+    expect(document.activeElement?.id).toBe('filter')
+    key(window, 'Escape')
+    expect(document.activeElement?.id).toBe('opener')
     ui.unmount()
   })
 

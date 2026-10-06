@@ -641,6 +641,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 
 ### Phase 4: Scan mode
 
+**Status (2026-10-06): built.** `src/modes/scan/` (layout, entry, pull request and team panes, typed selection), `src/ui/` (`Header`, `rows`, `LinkPicker`, `Reader`, `keymap`, `Clock`, `useMediaQuery`). Reachable at `/?ui=scan`; the classic layout stays the default. Fixes D1 (a plan row shows its item), D2 (reviews have a pane), D3 (hints come from the key table and a test presses every key), D4 and D7 (via the pane). 34 new tests. Checked in the browser: every list, the entry pane, start and add by key, the link picker, the reader, a lead's Team tab, drag onto the Blocked tab, Enter and Esc between list and pane, light theme, and an 800px window. Two bugs found and fixed on the way: the overlay overrode `autoFocus`, and it forgot what opened it when it had an `autoFocus` input.
+
 - **Files:** `src/modes/scan/ScanMode.tsx`, `src/ui/rows/*`, `src/ui/Header.tsx` (minimal), `src/ui/LinkPicker.tsx`, `src/ui/Reader.tsx`.
 - **Build:**
   - Left list (320px, `clamp(280px,24vw,360px)`): filter tabs Plan / Queue / Next / Reviews / Blocked with counts; a sixth **Team** tab for leads (§6.9). Queue has source sub-tabs with unplanned counts (`App.tsx:1180-1193`).
@@ -654,6 +656,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 - **Must still work:** all of R in Scan, plus classic.
 
 ### Phase 5: Flow mode
+
+**Status (2026-10-06): built.** `src/modes/flow/` (`FlowMode`, `sections`, `dayStrip`, `sprintLine`), `src/ui/QueueDrawer.tsx`, `src/ui/DetailModal.tsx` (Scan uses it too), `src/board/paneHandlers.ts` (shared by both modes), and a `layout` option on `CockpitPane` (`pane`, `flow`, `compact`). Reachable at `/?ui=flow`. Flow's keys live in `src/ui/keymap.ts` (`FLOW_KEYS`, and `hintsFor(…, 'flow')`). Checked in the browser: expand and collapse a plan row (Enter, Esc, focus returns), `q` opens the drawer and focuses its first card, Esc closes it and returns focus, a card dragged from the drawer onto the plan, a plan row dragged onto Blocked (the section appears while dragging), the reader from the calendar link, and an 800px window (no sideways scroll, drawer full width). Differences from the plan above: a plan row dragged onto Working starts its item and onto the drawer removes it from the plan; Enter on an *unlinked* row opens the picker (§6.6) while a click expands it to show the suggestion; Esc does not toggle the Working card.
 
 - **Files:** `src/modes/flow/FlowMode.tsx`, `src/ui/DetailModal.tsx`, `src/ui/QueueDrawer.tsx`.
 - **Build:**
