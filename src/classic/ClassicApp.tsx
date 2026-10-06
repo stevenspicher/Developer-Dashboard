@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Priority, Task, TaskType } from '../types'
 import {
   DEADLINE_TICKER_DAYS, QUEUES, STALE_STANDUP_DAYS, TEST_DEVELOPERS, addDays, daysBetween, localIsoDate, plainText,
-  shortDate, stripLinks,
+  shortDate,
 } from '../bridge'
-import type { BriefLine, Deadline, RelatedEntity, Sprint, StandupBrief } from '../bridge'
+import type { BriefLine, Deadline, Sprint, StandupBrief } from '../bridge'
 import { useBoardContext } from '../board/BoardContext'
 import { SOURCE_TABS, sourceSystem } from '../board/constants'
 import BootScreen from '../BootScreen'
@@ -14,8 +14,11 @@ import { FocusBar, MyDay, PlanRail } from './MyDay'
 import type { ReaderTab } from './MyDay'
 import { rankByTitle } from '../plan'
 import type { PlanEntry } from '../plan'
-import { AcceptanceProgress, Checklist, CockpitContext, DevLinksPanel, LinkedItemsPanel, NotesPanel } from '../Cockpit'
-import { LinkedText, RichText } from '../RichText'
+import { AcceptanceProgress } from '../ui/cockpit/Checklist'
+import { CockpitContext } from '../ui/cockpit/context'
+import { CockpitPane } from '../ui/cockpit/CockpitPane'
+import type { PaneActionId } from '../ui/cockpit/actions'
+import { LinkedText } from '../RichText'
 import { longDate as formatLongDate } from '../schedule'
 import { buildStandupDraft } from '../standup'
 import { StandupDraft } from '../StandupDraft'
@@ -155,99 +158,6 @@ function TaskCard({ task, onDragStart, compact = false, onClick, onDone, onAdd, 
   )
 }
 
-// ─── Detail Modal ─────────────────────────────────────────────────────────────
-
-function DetailModal({ task, planned, onClose, onStart, onAdd, onDone }: {
-  task: Task
-  planned: boolean
-  onClose: () => void
-  onStart: () => void
-  onAdd: () => void
-  onDone?: () => void
-}) {
-  const source = SOURCE_TABS.find(s => s.id === task.source)
-  return (
-    <Overlay onClose={onClose} className="max-h-[82vh] w-[720px]">
-      <div className="flex shrink-0 items-center gap-2.5 border-b border-accent/15 bg-accent/5 px-4 py-2.5">
-        <span className="chip">{TYPE_LABELS[task.type]}</span>
-        <span className="ref">{task.ref ?? task.id}</span>
-        {source && <span className="font-mono text-meta text-muted">via {source.label}</span>}
-        {task.url && <a href={task.url} target="_blank" rel="noreferrer" className="link font-mono text-meta">OPEN IN {linkTarget(task.url)} ↗</a>}
-        {task.link && <a href={task.link} target="_blank" rel="noreferrer" className="link font-mono text-meta">TICKET ↗</a>}
-        <div className="ml-auto flex items-center gap-2">
-          <PriorityBadge priority={task.priority} />
-          {task.points != null && <span className="chip">{task.points} pts</span>}
-          <CloseButton onClose={onClose} />
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-4 overflow-y-auto p-4">
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="mb-2 text-display font-bold text-ink">{task.title}</div>
-            {task.description && <RichText text={task.description} className="text-read text-fg" />}
-          </div>
-          {(task.assignee || task.sprint) && (
-            <div className="flex shrink-0 flex-col items-end gap-1.5">
-              <Avatar initials={task.assignee} />
-              {task.sprint && <span className="ref">{task.sprint}</span>}
-            </div>
-          )}
-        </div>
-
-        {task.externalState && (
-          <div className="flex flex-wrap gap-2">
-            <MetaBadge label="STATE" value={task.externalState} />
-          </div>
-        )}
-
-        <Checklist task={task} />
-        <DevLinksPanel task={task} />
-        <LinkedItemsPanel task={task} />
-        <NotesPanel task={task} />
-
-        <Tags tags={task.tags} />
-      </div>
-
-      <div className="flex shrink-0 items-center gap-2 border-t border-accent/15 px-4 py-2.5">
-        {task.status !== 'working' && <button className="btn-quiet" onClick={onStart}>▶ START</button>}
-        {!planned && task.status === 'queue' && (
-          <button className="btn-quiet" onClick={onAdd}>{task.source === 'pulse' ? '＋ CLAIM AND PLAN' : '＋ ADD TO PLAN'}</button>
-        )}
-        {planned && <span className="chip">In today's plan</span>}
-        {onDone && <span className="ml-auto"><DoneButton onDone={onDone} target={sourceSystem(task)} /></span>}
-      </div>
-    </Overlay>
-  )
-}
-
-function MetaBadge({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xs border border-line-soft bg-tint/[0.04] px-2 py-1">
-      <div className="label text-badge">{label}</div>
-      <div className="font-mono text-note text-fg">{value}</div>
-    </div>
-  )
-}
-
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="label mb-2 border-b border-line-soft pb-1.5">{label}</div>
-      {children}
-    </div>
-  )
-}
-
-function Tags({ tags }: { tags: string[] }) {
-  if (tags.length === 0) return null
-  return (
-    <div className="flex flex-wrap gap-1">
-      {tags.map(t => <span key={t} className="chip">#{t}</span>)}
-    </div>
-  )
-}
-
 // ─── Link picker ──────────────────────────────────────────────────────────────
 
 // Links a plan entry to a board item: closest titles first, filterable.
@@ -311,204 +221,53 @@ function LinkPicker({ entry, tasks, onLink, onUnlink, onClose }: {
   )
 }
 
-// ─── Working Space ────────────────────────────────────────────────────────────
+// ─── Detail modal and working space ───────────────────────────────────────────
 
-const RELATION_LABELS: Record<string, string> = { initiative: 'INITIATIVE', issue: 'ISSUE', analystIssue: 'ANALYST ISSUE', parent: 'PARENT' }
-const RELATION_FIELDS: Record<string, string[]> = {
-  initiative: ['Status', 'Impact', 'Deadline', 'Countdown'],
-  issue: ['Status', 'Priority'],
-  analystIssue: ['Status', 'Priority'],
-  parent: ['State', 'Assigned To', 'Iteration'],
-}
-const RELATION_TEXT_FIELDS = ['Description', 'Notes']
-
-const linkTarget = (url: string) => (url.includes('dev.azure.com') ? 'ADO' : 'NOTION')
-
-// ADO parents are labelled by their work item type (FEATURE, EPIC, …).
-const relationLabel = (entity: RelatedEntity) => {
-  const type = entity.relation === 'parent' ? entity.properties?.find(p => p.name === 'Type')?.value : undefined
-  return (type || RELATION_LABELS[entity.relation] || entity.relation).toUpperCase()
-}
-
-function RelatedCard({ entity, onOpen }: { entity: RelatedEntity; onOpen: () => void }) {
-  const prop = (name: string) => entity.properties?.find(p => p.name === name)?.value ?? ''
-  const fields = (RELATION_FIELDS[entity.relation] ?? []).map(name => [name, prop(name)] as const).filter(([, v]) => v)
-  const text = RELATION_TEXT_FIELDS.map(prop).find(Boolean) || entity.content || ''
+// Any item, opened in full: the cockpit pane in a modal.
+function DetailModal({ task, planned, onClose, handlers, doneTarget }: {
+  task: Task
+  planned: boolean
+  onClose: () => void
+  handlers: Partial<Record<PaneActionId, () => void>>
+  doneTarget: string | null
+}) {
   return (
-    <div
-      onClick={entity.error ? undefined : onOpen}
-      title={entity.error ? undefined : 'Click to expand'}
-      className={`rounded-xs border border-accent/15 bg-shade/30 px-2.5 py-2 ${entity.error ? '' : 'cursor-zoom-in hover:border-accent/35'}`}
-    >
-      <div className="label mb-1 text-badge">{relationLabel(entity)}</div>
-      {entity.error ? (
-        <div className="font-mono text-meta text-danger-fg">Unavailable — {entity.error}</div>
-      ) : (
-        <>
-          <div className="mb-1.5 text-body font-semibold leading-snug text-ink">{entity.title}</div>
-          {fields.length > 0 && (
-            <div className="mb-1.5 flex flex-wrap gap-1">
-              {fields.map(([name, value]) => (
-                <span key={name} className="chip">
-                  <span className="mr-1 text-muted">{name.toUpperCase()}</span>{value}
-                </span>
-              ))}
-            </div>
-          )}
-          {text && <div className="line-clamp-5 whitespace-pre-line text-note text-dim">{stripLinks(text)}</div>}
-          {entity.url && (
-            <a href={entity.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="link mt-1.5 inline-block font-mono text-meta">
-              OPEN IN {linkTarget(entity.url)} ↗
-            </a>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-function RelatedPanel({ related }: { related: RelatedEntity[] | 'loading' | { error: string } | undefined }) {
-  if (related === undefined || related === 'loading') {
-    return <span className="font-mono text-meta text-muted">LOADING CONTEXT…</span>
-  }
-  if (!Array.isArray(related)) {
-    return <span className="font-mono text-meta text-danger-fg">{related.error}</span>
-  }
-  const linked = related.filter(r => !r.empty)
-  if (linked.length === 0) {
-    return <span className="text-note text-muted">No linked initiative, issue, or parent</span>
-  }
-  return <RelatedCards linked={linked} />
-}
-
-function RelatedCards({ linked }: { linked: RelatedEntity[] }) {
-  const [open, setOpen] = useState<RelatedEntity | null>(null)
-  return (
-    <>
-      {linked.map(r => <RelatedCard key={`${r.relation}:${r.id}`} entity={r} onOpen={() => setOpen(r)} />)}
-      {open && <RelatedModal entity={open} onClose={() => setOpen(null)} />}
-    </>
-  )
-}
-
-const notionPageUrl = (id: string) => `https://app.notion.com/p/${id.replace(/-/g, '')}`
-
-function RelatedModal({ entity, onClose }: { entity: RelatedEntity; onClose: () => void }) {
-  const props = (entity.properties ?? []).filter(p => p.value && p.type !== 'relation')
-  const longText = props.filter(p => RELATION_TEXT_FIELDS.includes(p.name))
-  const fields = props.filter(p => !RELATION_TEXT_FIELDS.includes(p.name))
-  const content = (entity.content ?? '').split('\n').filter(l => !l.startsWith('[Sub-page:')).join('\n').trim()
-  return (
-    <Overlay onClose={onClose} className="h-[80vh] w-[760px]">
-      <div className="flex shrink-0 items-center gap-2.5 border-b border-accent/15 bg-accent/5 px-4 py-2.5">
-        <span className="label text-accent">{relationLabel(entity)}</span>
-        {entity.url && (
-          <a href={entity.url} target="_blank" rel="noreferrer" className="link font-mono text-meta">OPEN IN {linkTarget(entity.url)} ↗</a>
-        )}
-        <span className="ml-auto" />
-        <CloseButton onClose={onClose} />
-      </div>
-      <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-3.5">
-        <div className="text-display font-bold text-ink">{entity.title}</div>
-        {fields.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {fields.map(p => <MetaBadge key={p.name} label={p.name.toUpperCase()} value={p.value} />)}
-          </div>
-        )}
-        {longText.map(p => (
-          <Section key={p.name} label={p.name.toUpperCase()}>
-            <RichText text={p.value} className="text-read text-fg" />
-          </Section>
-        ))}
-        {content && (
-          <Section label="PAGE CONTENT">
-            <RichText text={content} className="text-read text-fg" />
-          </Section>
-        )}
-        {entity.sub_pages && entity.sub_pages.length > 0 && (
-          <Section label={`SUB-PAGES — ${entity.sub_pages.length}`}>
-            {entity.sub_pages.map(sp => (
-              <a key={sp.id} href={notionPageUrl(sp.id)} target="_blank" rel="noreferrer" className="link block py-1 text-read">
-                {sp.title || 'Untitled'} ↗
-              </a>
-            ))}
-          </Section>
-        )}
-        {!content && longText.length === 0 && (
-          <span className="text-body text-muted">No description or page content.</span>
-        )}
-      </div>
+    <Overlay onClose={onClose} className="h-[82vh] w-[920px]">
+      <CockpitPane
+        key={task.id}
+        task={task}
+        sourceLabel={SOURCE_TABS.find(s => s.id === task.source)?.label}
+        planned={planned}
+        doneTarget={doneTarget}
+        handlers={handlers}
+        onClose={onClose}
+      />
     </Overlay>
   )
 }
 
-function WorkingSpace({ task, related, onClear, onDone, onDragStart }: {
+// The item being worked on, in the middle of the board.
+function WorkingSpace({ task, handlers, doneTarget, onReturnDragStart }: {
   task: Task
-  related?: RelatedEntity[] | 'loading' | { error: string }
-  onClear: () => void
-  onDone?: () => void
-  onDragStart: (e: React.DragEvent, id: string) => void
+  handlers: Partial<Record<PaneActionId, () => void>>
+  doneTarget: string | null
+  onReturnDragStart: (e: React.DragEvent) => void
 }) {
   return (
-    <div className="panel hud-corner flex flex-1 flex-col overflow-hidden border-accent/30">
-      {/* Header */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-accent/15 bg-linear-to-r from-accent/10 to-transparent px-3 py-2">
-        <span className="pulse size-2 shrink-0 rounded-full bg-ok shadow-[0_0_8px_var(--ok)]" />
-        <span className="font-mono text-meta font-bold tracking-label text-accent">ACTIVE</span>
-        <span className="chip">{TYPE_LABELS[task.type]}</span>
-        <span className="ref">{task.ref ?? task.id}</span>
-        {task.externalState && <span className="chip">{task.externalState}</span>}
-        {task.url && <a href={task.url} target="_blank" rel="noreferrer" className="link font-mono text-meta">{linkTarget(task.url)} ↗</a>}
-        {task.link && <a href={task.link} target="_blank" rel="noreferrer" className="link font-mono text-meta">TICKET ↗</a>}
-        <span className="ml-auto" />
-        {onDone && <DoneButton onDone={onDone} target={sourceSystem(task)} />}
-        <button
-          draggable
-          onDragStart={e => onDragStart(e, task.id)}
-          onClick={onClear}
-          className="btn-quiet"
-          title="Drag back to the queue, or click to put it back in today's plan"
-        >RETURN ×</button>
-      </div>
-
-      {/* Two-col body: task detail | project context */}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto border-r border-accent/10 px-4 py-3.5">
-          <div>
-            <div className="mb-2 flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="mb-2 text-title font-bold text-ink">{task.title}</div>
-                {task.description && <RichText text={task.description} className="text-body text-fg" />}
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1.5">
-                <PriorityBadge priority={task.priority} />
-                {task.points != null && <span className="ref">{task.points}pt</span>}
-                <Avatar initials={task.assignee} />
-              </div>
-            </div>
-            <Tags tags={task.tags} />
-          </div>
-
-          <Checklist task={task} />
-          <NotesPanel task={task} />
-        </div>
-
-        <div className="flex w-[300px] shrink-0 flex-col gap-4 overflow-y-auto px-3 py-3.5">
-          <DevLinksPanel task={task} />
-          <div className="flex flex-col gap-2.5">
-            <div className="label border-b border-line-soft pb-1.5">PROJECT CONTEXT</div>
-            {task.queue
-              ? <RelatedPanel related={related} />
-              : <span className="text-note text-muted">No linked initiative, issue, or parent</span>}
-          </div>
-          <LinkedItemsPanel task={task} />
-        </div>
-      </div>
+    <div className="panel hud-corner flex min-h-0 flex-1 flex-col border-accent/30">
+      <CockpitPane
+        key={task.id}
+        task={task}
+        sourceLabel={SOURCE_TABS.find(s => s.id === task.source)?.label}
+        planned
+        working
+        doneTarget={doneTarget}
+        handlers={handlers}
+        onReturnDragStart={onReturnDragStart}
+      />
     </div>
   )
 }
-
-// ─── Main App ─────────────────────────────────────────────────────────────────
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
@@ -516,7 +275,7 @@ export default function ClassicApp() {
   const board = useBoardContext()
   const {
     visibleTasks, plan, tasksById, ticks, developer, currentDeveloper, today, sprint, brief, briefData, reviews, teamBlockers, progress,
-    related, bridgeLoading, bridgeErrors, actionError, toast, booting, focusing, workingTask, modalTask, linkFor, reader,
+    bridgeLoading, bridgeErrors, actionError, toast, booting, focusing, workingTask, modalTask, linkFor, reader,
     queueTab, dragId, dropTarget, planned, queueTasks, blockedTasks, openEntries, upNext, events, planView, nextUp,
     linkCandidates, unplannedCount, countOf, sprintHeader, sprintDay, sprintLength, sprintDaysLeft, tickerItems,
     calendarItems, bootSteps, bootSummary, actions, cockpit, doneHandler, startTask, addToPlan, moveTask, changeDeveloper,
@@ -524,6 +283,18 @@ export default function ClassicApp() {
     startFromDetail, addFromDetail, backToMyDay, returnToPlan, dismissError, linkEntry, unlinkEntry, closePicker,
     setReader, closeReader, undoToast, finishBoot,
   } = board
+
+  // What the cockpit pane's buttons do. In the modal, Start and Plan also close it.
+  const paneHandlers = (task: Task, inModal = false): Partial<Record<PaneActionId, () => void>> => ({
+    start: () => (inModal ? startFromDetail(task) : startTask(task)),
+    add: () => (inModal ? addFromDetail(task) : addToPlan(task)),
+    block: () => moveTask(task.id, 'blocked'),
+    unblock: () => actions.unblock(task),
+    return: () => returnToPlan(task),
+    done: doneHandler(task),
+  })
+  // The modal's item as it is now, so its buttons follow its lane.
+  const shownTask = modalTask ? tasksById.get(modalTask.id) : undefined
 
   const draftView = (
     <StandupDraft
@@ -673,10 +444,9 @@ export default function ClassicApp() {
             <FocusBar task={workingTask} next={nextUp} onBack={backToMyDay} onStart={startTask} />
             <WorkingSpace
               task={workingTask}
-              related={related[workingTask.id]}
-              onDragStart={handleDragStart}
-              onDone={doneHandler(workingTask)}
-              onClear={() => returnToPlan(workingTask)}
+              handlers={paneHandlers(workingTask)}
+              doneTarget={actions.doneTarget(workingTask)}
+              onReturnDragStart={e => handleDragStart(e, workingTask.id)}
             />
           </div>
         ) : (
@@ -705,12 +475,11 @@ export default function ClassicApp() {
       {/* ── Detail Modal ── */}
       {modalTask && (
         <DetailModal
-          task={modalTask}
+          task={shownTask ?? modalTask}
           planned={planned.has(modalTask.id)}
           onClose={closeDetail}
-          onStart={() => startFromDetail(modalTask)}
-          onAdd={() => addFromDetail(modalTask)}
-          onDone={doneHandler(modalTask)}
+          handlers={paneHandlers(shownTask ?? modalTask, true)}
+          doneTarget={actions.doneTarget(shownTask ?? modalTask)}
         />
       )}
 

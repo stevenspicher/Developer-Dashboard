@@ -8,9 +8,9 @@ import {
   fetchReviews, fetchStandup, fetchTeamBlockers, formatSprintRange, loadDeveloper, loadLanes, localIsoDate, queueFor,
   updateLanes,
 } from '../bridge'
-import type { BriefLine, Deadline, QueueProgress, RelatedEntity, Sprint, StandupBrief, TeamBlocker } from '../bridge'
+import type { BriefLine, Deadline, QueueProgress, Sprint, StandupBrief, TeamBlocker } from '../bridge'
 import type { BootStep, BootStepState } from '../BootScreen'
-import type { CockpitValue } from '../Cockpit'
+import type { CockpitValue } from '../ui/cockpit/context'
 import { clearTicks, loadTicks, saveTicks, toggleTick } from '../cockpitLogic'
 import { focusFirstRow } from '../keys'
 import {
@@ -52,7 +52,6 @@ export function useBoard() {
   const [reviews, setReviews] = useState<Reviews>(ADO_STORIES_ENABLED ? 'loading' : null) // PRs waiting on the developer
   const [brief, setBrief] = useState<StandupBrief | { error: string } | null>(null)
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
-  const [related, setRelated] = useState<Record<string, RelatedEntity[] | 'loading' | { error: string }>>({})
   const [reader, setReader] = useState<ReaderTab | null>(null)
   const [booting, setBooting] = useState(true)
   const [sprintStatus, setSprintStatus] = useState<BootStepState>('pending')
@@ -259,18 +258,6 @@ export function useBoard() {
 
   const workingTask = visibleTasks.find(t => t.status === 'working') ?? null
   const focusing = !!workingTask && view === 'focus'
-
-  // Related Initiative / Issue / Analyst Issue for the active item.
-  useEffect(() => {
-    if (!workingTask?.queue || related[workingTask.id]) return
-    const { id } = workingTask
-    setRelated(prev => ({ ...prev, [id]: 'loading' }))
-    const adapter = queueFor(workingTask)
-    if (!adapter?.related) return
-    adapter.related(workingTask)
-      .then(r => setRelated(prev => ({ ...prev, [id]: r })))
-      .catch(e => setRelated(prev => ({ ...prev, [id]: { error: errorText(e) } })))
-  }, [workingTask, related])
 
   // Move a card between lanes. Only one item can be in Working; the previous
   // one drops back to Todo. Sources that track lanes (Pulse claims, ADO state)
@@ -601,7 +588,7 @@ export function useBoard() {
   return {
     // state
     tasks, visibleTasks, tasksById, plan, ticks, developer, currentDeveloper, today, sprint, brief, briefData, deadlines,
-    reviews, teamBlockers, progress, related, bridgeLoading, bridgeErrors, actionError, toast, booting,
+    reviews, teamBlockers, progress, bridgeLoading, bridgeErrors, actionError, toast, booting,
     view, focusing, workingTask, modalTask, linkFor, reader, queueTab, dragId, dropTarget,
     // derived
     planned, queueTasks, blockedTasks, openEntries, upNext, events, planView, nextUp, linkCandidates,

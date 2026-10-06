@@ -626,6 +626,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 
 ### Phase 3: the cockpit pane, reusing existing logic
 
+**Status (2026-10-06): built.** `src/Cockpit.tsx` is split into `src/ui/cockpit/` (context, load cache, `Checklist`, `DevLinks`, `LinkedItems`, `Notes`, `ProjectContext`, lane rules in `actions.ts`, and `CockpitPane`), restyled with the shared components. The classic detail modal and Working Space are now thin frames around the pane, so dev links and project context load for any item (defect D4) and the pane is keyed by item (D7). Project context loads inside the pane, so `useBoard` no longer holds `related`. 44 new tests; checked in the browser for a story, a Task, a Pulse item, a Solarwinds ticket and an ADS ticket, and for Start, Block, Unblock and Return through the pane.
+
 - **Files:** `src/ui/cockpit/*` (split `src/Cockpit.tsx`), `src/ui/cockpit/ProjectContext.tsx` (from `App.tsx:359-469`), `src/ui/cockpit/CockpitPane.tsx`.
 - **Build:**
   - Header: type, ref, source label, external state, `NOTION ↗`/`ADO ↗`/`TICKET ↗`, priority line, points, sprint, avatar.

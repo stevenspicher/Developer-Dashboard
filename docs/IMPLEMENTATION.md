@@ -174,12 +174,13 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 **Working on an item:**
 - Starting an item switches the centre to it. A bar shows "← MY DAY" and the next plan entry, and today's plan and Blocked move into a right-hand rail. Marking it done returns to My Day with the next entry highlighted.
 
-**Working Space:**
-- Shows the active item with its state, NOTION ↗ or ADO ↗ and TICKET ↗ links, and ✓ DONE.
-- Its Project Context column lists the linked Initiative, Issue and Analyst Issue as cards (Notion items), or the parent work item (ADO stories).
-- Clicking a card opens a full view: every property with a value, full Description or Notes, full page content, and sub-page links.
+**Working Space and detail modal:** both show the same cockpit pane (`src/ui/cockpit/CockpitPane.tsx`), the working one with a green "Working" marker.
+- **Header:** type, ref, source, state, "Open in ADO/Notion ↗" and "Ticket ↗", priority, points, sprint and avatar.
+- **Action bar, by the item's lane:** queue → ▶ Start and ＋ Plan (＋ Claim and plan for a Pulse item; "In today's plan" instead when it already is); today → Start and Block; working → Return to plan (draggable back to the queue) and Block; blocked → Unblock. ✓ Done is added wherever the source can be written to. In the modal the buttons follow the item as its lane changes.
+- **Body:** title, description, checklist and notes, with dev links, project context and linked items beside them (below them when the pane is narrow, using a container query). Dev links and project context load for any item opened, not only the one being worked on, and the pane is keyed by the item so notes and ticks don't carry over to the next.
+- **Project context:** the linked Initiative, Issue and Analyst Issue as cards (Notion items), or the parent work item (ADO stories). A card opens a full view: every property with a value, full Description or Notes, full page content, and sub-page links.
 
-**Task cockpit** (`src/Cockpit.tsx`, logic in `src/cockpitLogic.ts`): the parts below appear in the detail modal and in the Working Space.
+**Task cockpit** (`src/ui/cockpit/`, logic in `src/cockpitLogic.ts`): the parts below appear in the pane.
 - **Acceptance criteria checklist:** each criterion can be ticked, with a count (3/5) in the heading and an `AC 3/5` chip on queue cards. Ticks are stored in this browser per developer (`devDashboard.criteria.<email>`, keyed by criterion text) and nothing is written to ADO. They are cleared when the item is marked done in the dashboard, or when ADO reports it Closed.
 - **Dev links** (stories): pull requests (OPEN, DRAFT, MERGED or ABANDONED), branches, builds (PASSED, FAILED, PARTIAL or RUNNING), commits and hyperlinks, from ado-bridge `GET /workitems/{id}/links`. Against an ado-bridge without that endpoint the panel says it needs updating.
 - **Linked items:** ADO child and related work items (the parent stays under Project Context), plus loaded items that name this one by ref (`US-12345`, `#12345`, `BLUEADS-222`, `SW-4021`) or are named by it. Matching is on ref text only. Items on the board open in the detail view; others link out to ADO.

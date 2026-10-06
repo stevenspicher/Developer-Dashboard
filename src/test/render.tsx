@@ -25,3 +25,13 @@ export const click = (el: Element) => run(() => (el as HTMLElement).click())
 
 export const key = (target: Element | Window, key: string, init: KeyboardEventInit = {}) =>
   run(() => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })) })
+
+// Lets promises that were started inside a test settle, then flushes React.
+export const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+
+export const type = (el: HTMLTextAreaElement | HTMLInputElement, value: string) =>
+  run(() => {
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
