@@ -186,16 +186,29 @@
   .task-card:hover { border-color: rgba(0, 212, 255, 0.4); }
   .task-card:active { cursor: grabbing; opacity: 0.7; transform: scale(0.98); }
 
-  .drop-active {
+  .drop-active,
+  .drop-zone[data-drop='on'] {
     border-color: rgba(0, 212, 255, 0.6) !important;
     background: rgba(0, 212, 255, 0.05) !important;
     box-shadow: 0 0 20px rgba(0, 212, 255, 0.15) !important;
   }
-  .drop-blocked-active {
+  .drop-zone-blocked[data-drop='on'] {
     border-color: rgba(255, 51, 85, 0.6) !important;
     background: rgba(255, 51, 85, 0.05) !important;
     box-shadow: 0 0 20px rgba(255, 51, 85, 0.15) !important;
   }
+
+  /* Keyboard-navigable rows (plan, up next, queue cards). */
+  .row { outline: none; }
+  .row:hover { background: rgb(255 255 255 / 0.02); }
+  .row:focus-visible,
+  .task-card:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+    background: rgba(0, 212, 255, 0.05);
+  }
+  /* Draws the eye to the next plan item after one is done. */
+  .row-flash { animation: row-flash 2.4s ease-out; }
 
   /* HUD corner brackets */
   .hud-corner::before,
@@ -220,16 +233,10 @@
 .crt-glow { text-shadow: 0 0 6px rgba(0, 212, 255, 0.35); }
 .crt-glow-ok { text-shadow: 0 0 8px rgba(0, 255, 136, 0.5); }
 
-/* Ticker */
-@keyframes ticker {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+@keyframes row-flash {
+  0%, 30% { background: rgba(0, 212, 255, 0.14); }
+  100% { background: transparent; }
 }
-.ticker-track {
-  animation: ticker 30s linear infinite;
-  white-space: nowrap;
-}
-.ticker-wrap:hover .ticker-track { animation-play-state: paused; }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
@@ -244,8 +251,8 @@
 .blink { animation: blink 1s step-end infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .ticker-track,
   .pulse,
-  .blink { animation: none; }
+  .blink,
+  .row-flash { animation: none; }
   .task-card { transition: none; }
 }

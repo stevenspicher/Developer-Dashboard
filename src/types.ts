@@ -19,6 +19,8 @@ export interface Task {
   title: string
   description: string
   priority: Priority
+  // The source's own priority wording ("P2", "Medium"), for "why" reasons.
+  priorityLabel?: string
   points?: number
   assignee: string
   sprint?: string

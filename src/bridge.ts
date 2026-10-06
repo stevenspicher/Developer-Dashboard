@@ -110,8 +110,10 @@ async function request<T>(path: string, init?: RequestInit, base = BRIDGE_BASE):
   return body
 }
 
+// Writes use keepalive so one flushed while the page unloads still reaches the
+// bridge (see the deferred "done" in App).
 const post = <T>(path: string, body: unknown) =>
-  request<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  request<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true })
 
 const dev = (developer: string) => `developer=${encodeURIComponent(developer)}`
 
@@ -146,6 +148,15 @@ export const releaseItem = (id: string, queue: string, developer: string) =>
 export const markItemDone = (id: string, queue: string, developer: string) =>
   post(`/items/${id}/done`, { developer, queue })
 
+// Whether a Notion page is finished: Status or State is Done/Resolved/Closed,
+// or a Mark Done checkbox is ticked. Used when a planned item leaves the board.
+export async function fetchPageDone(id: string): Promise<boolean> {
+  const page = await request<{ properties?: { name: string; value: string }[] }>(`/pages/${id}`)
+  return (page.properties ?? []).some(p =>
+    ((p.name === 'Status' || p.name === 'State') && /^(done|resolved|closed)$/i.test(p.value)) ||
+    (p.name === 'Mark Done' && p.value.startsWith('✓')))
+}
+
 // ─── ADO bridge (User Stories) ────────────────────────────────────────────────
 
 const ADO_BASE = '/ado'
@@ -174,7 +185,7 @@ interface AdoWorkItem {
 
 const adoGet = <T>(path: string) => request<T>(path, undefined, ADO_BASE)
 const adoPut = <T>(path: string, body: unknown) =>
-  request<T>(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, ADO_BASE)
+  request<T>(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true }, ADO_BASE)
 
 const setAdoState = (adoId: string, state: string) => adoPut(`/workitems/${adoId}/state`, { state })
 
@@ -297,6 +308,7 @@ function adoStoryToTask(w: AdoWorkItem): Task {
     notes: description,
     acceptanceCriteria: htmlToLines(w.acceptanceCriteria),
     priority: adoPriority(w.priority),
+    priorityLabel: w.priority != null ? `P${w.priority}` : undefined,
     points: w.storyPoints ?? undefined,
     assignee: initials(w.assignedToName ?? ''),
     sprint: sprintNumber ? `SPR-${sprintNumber}` : undefined,
@@ -335,13 +347,18 @@ function adoStoriesQueue(): QueueAdapter {
           donePoints: storyPoints(done),
           totalPoints: storyPoints(done) + storyPoints(stories),
         },
+        doneIds: done.map(s => String(s.adoId)),
       }
     },
     move: async (task, _from, to) => {
       const state = ADO_LANE_STATES[to]
       if (!state || state === task.externalState) return
       await setAdoState(task.id, state)
-      return { externalState: state }
+      return { patch: { externalState: state }, did: `Set ${task.ref ?? task.id} to ${state}` }
+    },
+    // `task` is the card as it was before the move.
+    revert: async task => {
+      if (task.externalState) await setAdoState(task.id, task.externalState)
     },
     done: task => setAdoState(task.id, ADO_DONE_STATE).then(() => undefined),
     related: async task => {
@@ -366,6 +383,23 @@ function adoStoriesQueue(): QueueAdapter {
       }
     },
   }
+}
+
+export interface TeamBlocker {
+  assignee: string
+  ref: string
+  title: string
+  url?: string
+}
+
+// Every blocked User Story in the current sprint, for a lead's team view. Only
+// ADO has a shared Blocked state: a Notion task blocked on the board stays in
+// that developer's browser.
+export async function fetchTeamBlockers(sprint: Sprint | null): Promise<TeamBlocker[]> {
+  const stories = await adoGet<AdoWorkItem[]>(`/workitems?${new URLSearchParams({ iteration: iterationFor(sprint) })}`)
+  return stories
+    .filter(s => s.state === 'Blocked')
+    .map(s => ({ assignee: s.assignedToName ?? s.assignedTo ?? '', ref: `US-${s.adoId}`, title: s.title, url: s.url ?? undefined }))
 }
 
 // ─── Mapping bridge items to cards ────────────────────────────────────────────
@@ -406,6 +440,17 @@ function selectPriority(value: string): Priority {
   return p === 'critical' || p === 'high' || p === 'medium' || p === 'low' ? p : 'none'
 }
 
+// ADS Tickets use a Jira-style scale.
+function adsPriority(value: string): Priority {
+  switch (value.toLowerCase()) {
+    case 'blocker': case 'critical': return 'critical'
+    case 'major': return 'high'
+    case 'minor': return 'medium'
+    case 'trivial': return 'low'
+    default: return 'none'
+  }
+}
+
 function bridgeTask(item: BridgeItem, queue: string, fields: Pick<Task, 'ref' | 'type' | 'source' | 'priority'> & Partial<Task>): Task {
   return {
     id: item.id,
@@ -436,27 +481,27 @@ export interface QueueAdapter {
   slug: string
   // Cards for the developer; claimedIds default to Todo when no lane is saved,
   // and `lanes` lets a source place cards from its own state (e.g. ADO Blocked).
+  // `doneIds` are items the source knows are finished (ADO Closed), so a
+  // planned item that leaves the board can be ticked off.
   load: (developer: string, sprint: Sprint | null) => Promise<{
     items: Task[]
     claimedIds: string[]
     lanes?: Record<string, Status>
-// ADS Tickets use a Jira-style scale.
-function adsPriority(value: string): Priority {
-  switch (value.toLowerCase()) {
-    case 'blocker': case 'critical': return 'critical'
-    case 'major': return 'high'
-    case 'minor': return 'medium'
-    case 'trivial': return 'low'
-    default: return 'none'
-  }
-}
-
     progress?: QueueProgress
+    doneIds?: string[]
   }>
-  // Returns fields to merge into the card after a successful write.
-  move?: (task: Task, from: Status, to: Status, developer: string) => Promise<Partial<Task> | void>
+  // Writes a lane change to the source, if the source tracks it. `did` names
+  // the write ("Claimed PULSE-…") for the undo toast; `patch` is merged into the card.
+  move?: (task: Task, from: Status, to: Status, developer: string) => Promise<MoveResult | void>
+  // Undoes a move's write; `task` is the card as it was before the move.
+  revert?: (task: Task, from: Status, to: Status, developer: string) => Promise<void>
   done?: (task: Task, developer: string) => Promise<void>
   related?: (task: Task) => Promise<RelatedEntity[]>
+}
+
+export interface MoveResult {
+  did: string
+  patch?: Partial<Task>
 }
 
 function notionQueue({ source, slug, claimable, doneable, toTask }: {
@@ -477,8 +522,21 @@ function notionQueue({ source, slug, claimable, doneable, toTask }: {
     },
     move: claimable
       ? async (task, from, to, developer) => {
-        if (from === 'queue' && to !== 'queue') await claimItem(task.id, slug, developer)
-        else if (from !== 'queue' && to === 'queue') await releaseItem(task.id, slug, developer)
+        const ref = task.ref ?? task.title
+        if (from === 'queue' && to !== 'queue') {
+          await claimItem(task.id, slug, developer)
+          return { did: `Claimed ${ref}` }
+        }
+        if (from !== 'queue' && to === 'queue') {
+          await releaseItem(task.id, slug, developer)
+          return { did: `Released ${ref}` }
+        }
+      }
+      : undefined,
+    revert: claimable
+      ? async (task, from, to, developer) => {
+        if (from === 'queue' && to !== 'queue') await releaseItem(task.id, slug, developer)
+        else if (from !== 'queue' && to === 'queue') await claimItem(task.id, slug, developer)
       }
       : undefined,
     done: doneable ? (task, developer) => markItemDone(task.id, slug, developer).then(() => undefined) : undefined,
@@ -541,9 +599,29 @@ export const QUEUES: QueueAdapter[] = [
         type: 'ticket',
         source: 'solarwinds',
         priority: selectPriority(displayValue(item, 'Priority')),
+        priorityLabel: displayValue(item, 'Priority') || undefined,
         notes: displayValue(item, 'Description'),
         externalState: displayValue(item, 'State') || undefined,
         link: displayValue(item, 'Link') || undefined,
+      })
+    },
+  }),
+  notionQueue({
+    source: 'ads',
+    slug: 'ads-tickets',
+    claimable: false,
+    doneable: false,
+    toTask: item => {
+      const key = displayValue(item, 'Issue Key')
+      return bridgeTask(item, 'ads-tickets', {
+        ref: key || shortRef('ADS', item.id),
+        type: 'ticket',
+        source: 'ads',
+        priority: adsPriority(displayValue(item, 'Priority')),
+        priorityLabel: displayValue(item, 'Priority') || undefined,
+        notes: displayValue(item, 'Description'),
+        externalState: displayValue(item, 'Status') || undefined,
+        link: displayValue(item, 'URL') || undefined,
       })
     },
   }),
@@ -589,22 +667,3 @@ export function deadlineTickerText(d: Deadline, today: string, withinDays: numbe
   }
   return `${d.title} · today`
 }
-  notionQueue({
-    source: 'ads',
-    slug: 'ads-tickets',
-    claimable: false,
-    doneable: false,
-    toTask: item => {
-      const key = displayValue(item, 'Issue Key')
-      return bridgeTask(item, 'ads-tickets', {
-        ref: key || shortRef('ADS', item.id),
-        type: 'ticket',
-        source: 'ads',
-        priority: adsPriority(displayValue(item, 'Priority')),
-        priorityLabel: displayValue(item, 'Priority') || undefined,
-        notes: displayValue(item, 'Description'),
-        externalState: displayValue(item, 'Status') || undefined,
-        link: displayValue(item, 'URL') || undefined,
-      })
-    },
-  }),
