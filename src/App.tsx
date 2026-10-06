@@ -37,7 +37,7 @@ const SOURCE_TABS = ([
   { id: 'zendesk',    label: 'Zendesk' },
   { id: 'ads',        label: 'ADS' },
 ] satisfies { id: QueueSource; label: string }[])
-  // Only sources with a live queue: Zendesk and ADS have none yet, and Stories
+  // Only sources with a live queue: Zendesk has none yet, and Stories
   // is off while ado-bridge serves mock data.
   .filter(tab => QUEUES.some(q => q.source === tab.id))
 

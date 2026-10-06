@@ -440,6 +440,17 @@ export interface QueueAdapter {
     items: Task[]
     claimedIds: string[]
     lanes?: Record<string, Status>
+// ADS Tickets use a Jira-style scale.
+function adsPriority(value: string): Priority {
+  switch (value.toLowerCase()) {
+    case 'blocker': case 'critical': return 'critical'
+    case 'major': return 'high'
+    case 'minor': return 'medium'
+    case 'trivial': return 'low'
+    default: return 'none'
+  }
+}
+
     progress?: QueueProgress
   }>
   // Returns fields to merge into the card after a successful write.
@@ -578,3 +589,22 @@ export function deadlineTickerText(d: Deadline, today: string, withinDays: numbe
   }
   return `${d.title} · today`
 }
+  notionQueue({
+    source: 'ads',
+    slug: 'ads-tickets',
+    claimable: false,
+    doneable: false,
+    toTask: item => {
+      const key = displayValue(item, 'Issue Key')
+      return bridgeTask(item, 'ads-tickets', {
+        ref: key || shortRef('ADS', item.id),
+        type: 'ticket',
+        source: 'ads',
+        priority: adsPriority(displayValue(item, 'Priority')),
+        priorityLabel: displayValue(item, 'Priority') || undefined,
+        notes: displayValue(item, 'Description'),
+        externalState: displayValue(item, 'Status') || undefined,
+        link: displayValue(item, 'URL') || undefined,
+      })
+    },
+  }),
