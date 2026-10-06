@@ -997,9 +997,18 @@ Static checks to add to CI (cheap):
 |---|---|
 | Q1 | **Two layouts (Scan and Flow) plus the light theme.** Calm is not a third layout. |
 | Q8 | **Skip the board.** Not built in this migration (§6.13). |
+| Q2 | **Follow the guide:** Scan on windows 1100px wide or more, Flow below. |
+| Q3 | **Per developer, stored locally** in `devDashboard.ui.<email>` (layout, theme, density). |
+| Q4 | **The HUD look is kept as an option for now**, not retired. How it is offered (a theme, or an ornaments switch on the dark theme) is settled in Phase 1. |
+| Q5 | **Keep the boot screen; recolour it to match the saved theme** and change nothing else for now. This replaces the guide's recommendation to swap it for a non-blocking loading state. |
+| Q6 | **Default to Dark for the first release.** The theme picker offers Dark, Light and System. Once Light has had real use, make System the default. A saved choice always wins. |
+| Q7 | **One dark palette (option A).** Dark is today's navy and cyan without the HUD ornaments, and the HUD look is a switch that adds them. Scan's grey and blue palette is not shipped, and it can be reconsidered later without redoing the layouts. |
+| Q9 | **Keep one reader** with four tabs for this migration, and revisit after use. The standup draft stays a standalone component, so splitting it later is cheap. |
+| Q10 | **Yes:** add `r` for Reviews in Scan. |
+| Q11 | **No further role for Figma Make.** The design project is a one-off reference; production changes land in this repo only, and the guide's notes on keeping a fixture board for round-tripping (§10.3) are not needed. |
 | R6 | **`package-lock.json` is the source of truth.** Dependencies change through `npm install`, and the lockfile is committed with `package.json`. `pnpm-lock.yaml` is left alone: Figma Make regenerates it (`--no-frozen-lockfile`), and it is not kept in sync by hand. |
 
-The other questions in §9.1 are still open; their recommendations stand until the product owner answers.
+Every question in §9.1 is now decided. Q4, Q5 and Q6 above change the earlier recommendations in §9.1; where a row there disagrees with this table, this table wins.
 
 ### 9.2 Risks
 
