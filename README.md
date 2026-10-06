@@ -14,6 +14,16 @@ npm run dev        # http://localhost:8443, proxies /bridge → localhost:3100, 
 Point the proxy elsewhere with `NOTION_BRIDGE_URL` / `ADO_BRIDGE_URL`.
 ADO User Stories are on by default and need ado-bridge connected to Azure DevOps (`ADO_PAT` in its `.env`). Start with `VITE_ADO_STORIES=false` to hide them.
 
+## Tests
+
+```bash
+npm test           # Vitest: the logic modules (plan, ranking, schedule, standup, ticks, keys)
+npm run test:watch
+```
+
+Tests sit next to the code (`src/*.test.ts`). A test that needs `localStorage` or the DOM
+starts with `// @vitest-environment jsdom`. `npx tsc --noEmit` checks types.
+
 ## Dependencies
 
 `package-lock.json` is the source of truth: the Docker build installs from it

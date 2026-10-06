@@ -172,7 +172,8 @@ const SUGGEST_AT = 0.4
 const LINK_MARGIN = 0.1
 const DUPLICATE_AT = 0.8
 
-const ADO_REF = /\b(?:US-?|#)(\d{4,6})\b/gi
+// `#` isn't a word character, so a `\b` in front of it never matches after a space.
+const ADO_REF = /(?<![\w&])(?:US-?|#)(\d{4,6})\b/gi
 const adoRefs = (text: string) => [...text.matchAll(ADO_REF)].map(m => m[1])
 
 // Links every unlinked entry it can. Returns the same plan when nothing changed.
