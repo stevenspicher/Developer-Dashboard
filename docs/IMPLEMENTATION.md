@@ -20,7 +20,7 @@ The bridge drives almost everything from `config/manifest.json`. Adding or retun
 
 ## 2. Notion setup (current state)
 **Databases shared with the bridge integration:**
-- Sprint Developer Items, Pulse Queue, Solarwinds, Sprints
+- Sprint Developer Items, Pulse Queue, Solarwinds, ADS Tickets, Sprints
 - Initiatives, Issues, Analyst Issues, Deadlines and Milestones
 - also shared, but unused: Upgrade Work Items
 
@@ -39,6 +39,9 @@ The bridge drives almost everything from `config/manifest.json`. Adding or retun
 | Solarwinds | Assignee Name | Text | which developer sees the ticket |
 | Solarwinds | State | Select | open states shown; Resolved hidden |
 | Solarwinds | Initiative, Issue, Analyst Issue | Relation | Working Space context |
+| ADS Tickets | Status | Status | open states shown; Done hidden |
+| ADS Tickets | Priority | Select | Blocker/Critical, Major, Minor, Trivial |
+| ADS Tickets | Issue Key, Issue Type, Description, URL | Text, Select, Text, URL | card ref, detail and Jira link |
 | Sprints | Status = Focus, Deadline, Name "Sprint N" | | current sprint |
 | Deadlines and Milestones | Label, Start Date, End Date | | calendar and ticker |
 
@@ -59,6 +62,7 @@ The bridge drives almost everything from `config/manifest.json`. Adding or retun
 | `sprint-developer-items` | Sprint Developer Items | Lists items where Mark Done = False and the Developer is the viewer or empty. `done: {Mark Done: true, Status: Done}`. No claimed state. |
 | `pulse-queue` | Pulse Queue | Claimable in Pending or Posted. `claimedState: In progress`, `releaseState: Pending`, `done: {Status: Done}`, assignee `Developer`. |
 | `solarwinds` | Solarwinds | `readOnly`. `assigneeTextProperty: Assignee Name`. Every State except Resolved is listed. |
+| `ads-tickets` | ADS Tickets | `readOnly`. No assignee property, so every developer sees the same tickets. Listed in Not started, To Do, Blocked, On Hold, Waiting for Information or Client Review; Done is hidden. |
 | `team-initiatives`, `issues`, `analyst-issues` | relation targets | Read-only context. |
 | `deadlines-milestones` | Deadlines and Milestones | Read via `/databases/:slug/query`. |
 
@@ -129,10 +133,11 @@ New manifest fields:
 | Pulse | `pulse-queue` | `PULSE-xxxxxx`, Description, `SPR-N`. Priority MED for the current sprint, HIGH 1 sprint behind, CRIT 2 or more. | Drag out = claim, drag back = release, ✓ DONE |
 | Solarwinds | `solarwinds` | `SW-{Number}`, Priority, Description, State | Read-only; lanes are dashboard-only |
 
-Zendesk and ADS have no queue yet, so their tabs are hidden.
+Zendesk has no queue yet, so its tab is hidden. The queues list only items that aren't in today's plan, and the tab counts do the same.
 
 **Board behavior:**
 - **Lanes:** Todo, Working and Blocked are saved in localStorage per developer (`devDashboard.lanes.<email>`), so they survive reloads.
+| ADS | `ads-tickets` | Issue Key (`BLUEADS-222`), Priority, Description, Status, Jira link. Blocker and Critical = CRIT, Major = HIGH, Minor = MED, Trivial = LOW. | Read-only; lanes are dashboard-only. A team-wide queue, not filtered per developer |
 - **Rebuilt on refresh:** each refresh rebuilds the bridge-backed cards from the bridge. Claimed Pulse items default to Todo.
 - **One item in Working:** dropping a new item there moves the previous one to Todo.
 - **Claim and release:** moves are shown immediately. If the claim or release fails, the card moves back and the queue panel shows a dismissible error.
