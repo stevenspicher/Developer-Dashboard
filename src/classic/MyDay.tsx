@@ -1,58 +1,21 @@
 import { useState } from 'react'
 
-import type { Task } from './types'
-import type { BriefLine, PullRequest, QueueProgress, Sprint, StandupBrief, TeamBlocker } from './bridge'
-import { daysBetween } from './bridge'
-import { rowKeys } from './keys'
-import type { Plan, PlanEntry } from './plan'
-import type { Reason, Suggestion } from './ranking'
-import { LinkedText } from './RichText'
-import type { DayEvent } from './schedule'
-import { dayLabel, longDate, monthDay, weekdayShort, workingDaysAfter } from './schedule'
+import type { Task } from '../types'
+import type { BriefLine, PullRequest, QueueProgress, Sprint, StandupBrief, TeamBlocker } from '../bridge'
+import { daysBetween } from '../bridge'
+import { rowKeys } from '../keys'
+import type { PlanEntry } from '../plan'
+import type { Reason, Suggestion } from '../ranking'
+import { LinkedText } from '../RichText'
+import type { DayEvent } from '../schedule'
+import { dayLabel, longDate, monthDay, weekdayShort, workingDaysAfter } from '../schedule'
 
 // ─── My Day ───────────────────────────────────────────────────────────────────
 // The centre of the board when nothing is being worked on: today's plan (the
 // standup's responsibilities plus anything added), ranked suggestions, blocked
 // items, coming dates and the team's notes.
-
-export type DropZone = 'today' | 'working' | 'blocked' | 'queue'
-export type ReaderTab = 'brief' | 'ticker' | 'calendar' | 'draft'
-
-// Pull requests waiting on the developer. Null when there's no ado-bridge to ask.
-export type Reviews = PullRequest[] | 'loading' | { error: string } | null
-
-// What My Day asks the board to do.
-export interface DayActions {
-  toggle: (entry: PlanEntry) => void
-  start: (task: Task) => void
-  add: (task: Task) => void
-  remove: (entry: PlanEntry) => void
-  shift: (entry: PlanEntry, delta: number) => void
-  reorder: (id: string, beforeId: string | null) => void
-  confirm: (entry: PlanEntry, task: Task) => void
-  reject: (entry: PlanEntry, task: Task) => void
-  pick: (entry: PlanEntry) => void
-  open: (task: Task) => void
-  block: (task: Task) => void
-  unblock: (task: Task) => void
-  done: (task: Task) => void
-  resume: () => void
-  openReader: (tab: ReaderTab) => void
-  dragItem: (e: React.DragEvent, id: string) => void
-  dropProps: (zone: DropZone) => React.HTMLAttributes<HTMLElement> & { 'data-drop'?: 'on' }
-  doneTarget: (task: Task) => string | null // where ✓ writes, or null when the source is read-only
-}
-
-// The plan plus what each entry needs to render.
-export interface PlanView {
-  plan: Plan
-  tasksById: Map<string, Task>
-  suggestions: Map<string, Task> // entry id → item it probably refers to
-  reasons: (task: Task) => Reason[]
-  duplicates: Map<string, Task>
-  highlight: string | null // entry to draw the eye to, e.g. the next one after a done
-  workingId: string | null
-}
+import type { DayActions, PlanView, Reviews } from '../board/types'
+export type { DayActions, DropZone, PlanView, ReaderTab, Reviews } from '../board/types'
 
 const UP_NEXT_SHOWN = 6
 // A review waiting this many days is flagged.

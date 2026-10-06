@@ -126,8 +126,9 @@ New manifest fields:
 - `src/bridge.ts`: API client, the `QUEUES` adapters (Notion queues and ADO Stories), saved lanes, the ADO HTML-to-text conversion, date helpers, tunable constants.
 - `src/RichText.tsx`: renders description text with its line breaks and clickable links.
 - `src/BootScreen.tsx`: the terminal-style loading screen.
-- `src/App.tsx`: board state and wiring (queues, writes and undo, keyboard), the working space, and the overlays (detail, link picker, reader).
-- `src/MyDay.tsx`: the My Day view, plus the focus bar and plan rail shown while working on an item.
+- `src/App.tsx`: mounts the board and the current layout (`<BoardProvider><ClassicApp/></BoardProvider>`).
+- `src/board/useBoard.ts`: all the board's state and behaviour with no markup: queues, writes and undo, the plan, lanes, ticks, the standup, derived views and the global shortcuts. `board/BoardContext.tsx` provides it, `board/types.ts` holds the shared types (`DayActions`, `PlanView`, `Toast`…) and `board/constants.ts` the source tabs and timings.
+- `src/classic/ClassicApp.tsx`: the current layout (header, queues panel, working space, overlays), a view over the board. `src/classic/MyDay.tsx`: the My Day view, plus the focus bar and plan rail shown while working on an item.
 - `src/plan.ts`: the day's plan: storage, carry-over, merging the standup, and linking entries to board items.
 - `src/ranking.ts`: the "Up next" ranking and its reasons.
 - `src/schedule.ts`: "Coming up" (including dates read from team items) and day arithmetic.

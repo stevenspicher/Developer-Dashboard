@@ -585,6 +585,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 
 ### Phase 0: safety net and shared state, no visual change
 
+**Status (2026-10-06): built.** 88 tests cover `plan.ts`, `ranking.ts`, `cockpitLogic.ts`, `standup.ts`, `schedule.ts` and `keys.ts` (`npm test`). `App()`'s state moved to `src/board/useBoard.ts` and the current UI to `src/classic/`. The rendered HTML matched the pre-refactor build for My Day, the focus view, the detail modal, all four reader tabs, the link picker and a developer switch. Two small bug fixes came with it: `plan.ts` now links `#12345` mentions after a space, and one known flaw is a todo in `schedule.test.ts`. The `?ui=classic` switch isn't needed until a second layout exists (Phase 4).
+
 **0a. Tests for the pure logic (Recommendation, see §8.2).** Add Vitest and tests for `plan.ts`, `ranking.ts`, `cockpitLogic.ts`, `standup.ts`, `schedule.ts`. This locks behaviour before the refactor.
 
 **0b. Extract `useBoard`.**
