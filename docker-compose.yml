@@ -3,8 +3,8 @@ services:
     build:
       context: .
       args:
-        # Set to true once ado-bridge serves real Azure DevOps data (needs a rebuild).
-        VITE_ADO_STORIES: ${VITE_ADO_STORIES:-false}
+        # Set to false to hide User Stories (needs a rebuild).
+        VITE_ADO_STORIES: ${VITE_ADO_STORIES:-true}
     image: developer-dashboard
     ports:
       - "${DASHBOARD_PORT:-8080}:80"

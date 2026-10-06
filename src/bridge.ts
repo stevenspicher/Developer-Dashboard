@@ -544,9 +544,10 @@ function notionQueue({ source, slug, claimable, doneable, toTask }: {
   }
 }
 
-// ADO User Stories stay off while ado-bridge serves mock data (ADO_MOCK=true).
-// Start the dev server with VITE_ADO_STORIES=true to turn them back on.
-export const ADO_STORIES_ENABLED = import.meta.env.VITE_ADO_STORIES === 'true'
+// ADO User Stories are on by default and need ado-bridge running against Azure
+// DevOps. Start the dev server with VITE_ADO_STORIES=false to hide them, e.g.
+// while ado-bridge has no credentials.
+export const ADO_STORIES_ENABLED = import.meta.env.VITE_ADO_STORIES !== 'false'
 
 export const QUEUES: QueueAdapter[] = [
   ...(ADO_STORIES_ENABLED ? [adoStoriesQueue()] : []),

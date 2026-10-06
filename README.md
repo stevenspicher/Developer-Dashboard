@@ -12,7 +12,7 @@ npm run dev        # http://localhost:8443, proxies /bridge → localhost:3100, 
 ```
 
 Point the proxy elsewhere with `NOTION_BRIDGE_URL` / `ADO_BRIDGE_URL`.
-ADO User Stories are off by default; start with `VITE_ADO_STORIES=true` to enable them.
+ADO User Stories are on by default and need ado-bridge connected to Azure DevOps (`ADO_PAT` in its `.env`). Start with `VITE_ADO_STORIES=false` to hide them.
 
 ## Docker
 

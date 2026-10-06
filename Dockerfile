@@ -20,7 +20,7 @@ RUN npm ci
 COPY . .
 
 # Vite inlines VITE_* at build time, so this is a build arg, not a runtime env.
-ARG VITE_ADO_STORIES=false
+ARG VITE_ADO_STORIES=true
 ENV VITE_ADO_STORIES=$VITE_ADO_STORIES
 RUN npm run build
 

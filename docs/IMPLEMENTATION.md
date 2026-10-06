@@ -134,7 +134,7 @@ New manifest fields:
 **Queues (left panel):**
 | Tab | Source | Card | Actions |
 |---|---|---|---|
-| Stories | ado-bridge `/workitems`: User Stories assigned to the developer in the current sprint's iteration (`Blue Digital\Sprint N YYYY`). Off unless the dev server starts with `VITE_ADO_STORIES=true`. | `US-{id}`, state, points, description, acceptance criteria. ADO priority 1 = HIGH, 2 = MED, 3+ = LOW. | Adding to the plan or starting it sets Active, blocking sets Blocked, ✓ DONE sets Closed. Active stories start in the plan and Blocked ones in Blocked. |
+| Stories | ado-bridge `/workitems`: User Stories assigned to the developer in the current sprint's iteration (`Blue Digital\Sprint N YYYY`). On by default; `VITE_ADO_STORIES=false` hides them. | `US-{id}`, state, points, description, acceptance criteria. ADO priority 1 = HIGH, 2 = MED, 3+ = LOW. | Adding to the plan or starting it sets Active, blocking sets Blocked, ✓ DONE sets Closed. Active stories start in the plan and Blocked ones in Blocked. |
 | Tasks | `sprint-developer-items` | `DEV-xxxxxx`, Notes, developer initials, `SPR-N`, standup age. HIGH if the standup is more than 6 days old. | ✓ DONE; lanes are dashboard-only |
 | Pulse | `pulse-queue` | `PULSE-xxxxxx`, Description, `SPR-N`. Priority MED for the current sprint, HIGH 1 sprint behind, CRIT 2 or more. | Adding to the plan, starting or dragging out claims it ("＋ CLAIM"); dragging back releases it; ✓ DONE |
 | Solarwinds | `solarwinds` | `SW-{Number}`, Priority, Description, State | Read-only; lanes are dashboard-only |
@@ -305,9 +305,9 @@ Stories closed/committed comes from the ADO query, which includes closed items f
 ## 6. Known limitations and next steps
 - **Cold-start latency:** the bridge allows 2.5 Notion requests/sec, and the queue cache lasts 30 seconds. Right after a bridge restart, the first load takes about 10–20 seconds, mainly walking the sprint page tree and loading all 779 rows of Sprint Developer Items. The boot screen covers it. A longer queue TTL or warming the cache in the background would fix it properly.
 - **Temporary developer switcher:** the TEMP switcher (`TEST_DEVELOPERS`, and the `TEMP` `<select>` in `App.tsx`) should be replaced by real login.
-- **ADO Stories run on mock data:**
-  - The Stories tab is off unless the dev server starts with `VITE_ADO_STORIES=true`.
-  - While `ADO_MOCK=true`, ado-bridge serves a local seed. Moves and ✓ DONE change only its in-memory copy, which resets when it restarts.
+- **ADO Stories need credentials:**
+  - The Stories tab is on by default and reads real Azure DevOps data through ado-bridge, which needs `ADO_PAT` in its `.env`. Moves and ✓ DONE write to Azure DevOps.
+  - With `ADO_MOCK=true`, ado-bridge serves a local seed instead, and moves change only its in-memory copy, which resets when it restarts. Use `VITE_ADO_STORIES=false` to hide the tab when ado-bridge isn't available.
 - **No done/total for Notion queues:** notion-bridge returns only open Sprint Developer Items and Pulse rows, so only Stories shows closed/committed.
 - **Briefs don't link to items:** the 10/02 briefs have no @mentions of tasks, so plan entries link by title (4 of 6 that day), with CONFIRM or LINK for the rest. If the brief generator @mentioned the task on each responsibility, linking would be exact.
 - **Blocked Notion items stay private:** Notion has no Blocked status. Sprint Developer Items uses Backlog / In Progress / Done; Pulse uses Not started / Pending / Posted / In progress / Done. A blocked Notion task is therefore only visible in its developer's browser, and a lead sees ADO blockers only. A Blocked status in Notion, written by the board, would fix this.
