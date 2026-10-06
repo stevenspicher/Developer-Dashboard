@@ -44,22 +44,23 @@ const focusRow = (list: string) => document.querySelector<HTMLElement>(`[data-ro
 
 type Actions = Board['actions']
 
+// What a row in Up next, Blocked or the drawer responds to.
+const itemHandlers = (task: Task, mode: 'queue' | 'next' | 'blocked', actions: Actions): Handlers => ({
+  open: () => actions.open(task),
+  start: () => actions.start(task),
+  add: mode === 'blocked' ? () => actions.unblock(task) : () => actions.add(task),
+  block: mode === 'blocked' ? undefined : () => actions.block(task),
+  done: actions.doneTarget(task) ? () => actions.done(task) : undefined,
+})
+
 // A row for an item in Up next, Blocked or the drawer.
-function ItemRow({ task, mode, actions, reasons, onUsed }: {
+function ItemRow({ task, mode, actions, reasons }: {
   task: Task
   mode: 'queue' | 'next' | 'blocked'
   actions: Actions
   reasons?: { text: string; urgent?: boolean }[]
-  onUsed: (h: Handlers) => void
 }) {
-  const handlers: Handlers = {
-    open: () => actions.open(task),
-    start: () => actions.start(task),
-    add: mode === 'blocked' ? () => actions.unblock(task) : () => actions.add(task),
-    block: mode === 'blocked' ? undefined : () => actions.block(task),
-    done: actions.doneTarget(task) ? () => actions.done(task) : undefined,
-  }
-  onUsed(handlers)
+  const handlers = itemHandlers(task, mode, actions)
   return (
     <TaskListRow
       task={task}
@@ -108,6 +109,11 @@ export default function FlowMode() {
   // Every action some row can do, for the key hints below.
   const used = new Set<RowAction>()
   const noteUsed = (h: Handlers) => (Object.keys(h) as RowAction[]).forEach(action => { if (h[action]) used.add(action) })
+  // Noted while this layout renders: a row component would render after the hints are built.
+  const itemRow = (task: Task, mode: 'queue' | 'next' | 'blocked', reasons?: { text: string; urgent?: boolean }[]) => {
+    noteUsed(itemHandlers(task, mode, actions))
+    return <ItemRow key={task.id} task={task} mode={mode} actions={actions} reasons={reasons} />
+  }
 
   // ── Keys that act on the whole page.
   const openDrawer = () => setDrawer(true)
@@ -225,6 +231,16 @@ export default function FlowMode() {
 
   const shownUpNext = allUpNext ? upNext : upNext.slice(0, UP_NEXT_SHOWN)
   const planLabel = lead ? 'Your plan' : "Today's plan"
+  // Built before the hints, so the hints cover what these rows respond to.
+  const blockedRows = blockedTasks.map(t => itemRow(t, 'blocked'))
+  const upNextRows = shownUpNext.map(s => itemRow(s.task, 'next', s.reasons))
+  const queueRows = drawer ? queueTasks.map(t => itemRow(t, 'queue')) : []
+  const reviewRows = reviewList.map(pr => {
+    const open = () => window.open(pr.url, '_blank', 'noopener')
+    const handlers: Handlers = { open }
+    noteUsed(handlers)
+    return <ReviewListRow key={pr.pullRequestId} pr={pr} id={`review:${pr.pullRequestId}`} selected={false} today={today} handlers={handlers} onSelect={() => {}} onActivate={open} />
+  })
   const hints = hintsFor(used, 'flow')
 
   return (
@@ -287,7 +303,7 @@ export default function FlowMode() {
               >
                 {planRows}
               </div>
-              {plan.entries.length === 0 && <EmptyState title="Nothing planned yet" hint={briefData ? 'Add items from Up next, or drag them in from the queues.' : BRIEFLESS_PLAN} />}
+              {plan.entries.length === 0 && <EmptyState title="Nothing planned yet" hint={briefData?.mode === 'brief' || lead ? 'Add items from Up next, or drag them in from the queues.' : BRIEFLESS_PLAN} />}
             </Section>
 
             <Section id="flow-working" label="Working" {...toWorking} className="drop-zone">
@@ -315,7 +331,7 @@ export default function FlowMode() {
             {(blockedTasks.length > 0 || dragging) && (
               <Section id="flow-blocked" label="Blocked" count={blockedTasks.length} tone="danger" {...toBlocked} className="drop-zone drop-zone-blocked">
                 <div data-rows="blocked">
-                  {blockedTasks.map(t => <ItemRow key={t.id} task={t} mode="blocked" actions={actions} onUsed={noteUsed} />)}
+                  {blockedRows}
                 </div>
                 {blockedTasks.length === 0 && <div className="py-2 text-note text-muted">Drop here to mark it blocked.</div>}
               </Section>
@@ -328,7 +344,7 @@ export default function FlowMode() {
               right={upNext.length > UP_NEXT_SHOWN && <SectionLink onClick={() => setAllUpNext(v => !v)}>{allUpNext ? 'Show fewer' : `Show all ${upNext.length}`}</SectionLink>}
             >
               <div data-rows="upnext">
-                {shownUpNext.map(s => <ItemRow key={s.task.id} task={s.task} mode="next" actions={actions} reasons={s.reasons} onUsed={noteUsed} />)}
+                {upNextRows}
               </div>
               {upNext.length === 0 && <div className="py-2 text-note text-muted">Nothing waiting outside your plan.</div>}
             </Section>
@@ -336,12 +352,7 @@ export default function FlowMode() {
             {reviews !== null && (
               <Section id="flow-reviews" label="Reviews waiting" count={reviewList.length || undefined}>
                 <div data-rows="reviews">
-                  {reviewList.map(pr => {
-                    const open = () => window.open(pr.url, '_blank', 'noopener')
-                    const handlers: Handlers = { open }
-                    noteUsed(handlers)
-                    return <ReviewListRow key={pr.pullRequestId} pr={pr} id={`review:${pr.pullRequestId}`} selected={false} today={today} handlers={handlers} onSelect={() => {}} onActivate={open} />
-                  })}
+                  {reviewRows}
                 </div>
                 {reviews === 'loading' && <div className="py-2 font-mono text-meta text-muted">Loading…</div>}
                 {reviews && !Array.isArray(reviews) && reviews !== 'loading' && (
@@ -380,7 +391,7 @@ export default function FlowMode() {
             />
             {bridgeErrors[queueTab] && <div className="shrink-0 p-2"><ErrorNote>Bridge error · {bridgeErrors[queueTab]}</ErrorNote></div>}
             <div data-rows="queue" className="min-h-0 flex-1 overflow-y-auto">
-              {queueTasks.map(t => <ItemRow key={t.id} task={t} mode="queue" actions={actions} onUsed={noteUsed} />)}
+              {queueRows}
               {queueTasks.length === 0 && (
                 bridgeLoading && QUEUES.some(q => q.source === queueTab)
                   ? <EmptyState title="Loading…" />

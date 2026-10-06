@@ -216,6 +216,25 @@ describe('Overlay', () => {
     ui.unmount()
   })
 
+  it('closes only the top overlay on Esc when one is opened from inside another', () => {
+    function Nested() {
+      const [outer, setOuter] = useState(true)
+      const [inner, setInner] = useState(true)
+      return outer ? (
+        <Overlay label="Outer" onClose={() => setOuter(false)}>
+          <button id="outer">Outer</button>
+          {inner && <Overlay label="Inner" onClose={() => setInner(false)}><button id="inner">Inner</button></Overlay>}
+        </Overlay>
+      ) : null
+    }
+    const ui = mount(<Nested />)
+    key(window, 'Escape')
+    expect([...document.querySelectorAll('[role=dialog]')].map(d => d.getAttribute('aria-label'))).toEqual(['Outer'])
+    key(window, 'Escape')
+    expect(document.querySelector('[role=dialog]')).toBeNull()
+    ui.unmount()
+  })
+
   it('keeps Tab and Shift+Tab inside the panel', () => {
     const ui = mount(<Harness onClose={() => {}} />)
     const dialog = document.querySelector('[role=dialog]')!

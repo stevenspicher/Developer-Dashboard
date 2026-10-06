@@ -13,6 +13,7 @@ export function Overlay({ onClose, label, className = '', children }: {
   children: ReactNode
 }) {
   const panel = useRef<HTMLDivElement>(null)
+  const layer = useRef<HTMLDivElement>(null)
   const close = useRef(onClose)
   close.current = onClose
   // What had focus when it opened, read while rendering: an autoFocus input inside
@@ -25,7 +26,13 @@ export function Overlay({ onClose, label, className = '', children }: {
       const first = panel.current?.querySelector<HTMLElement>(FOCUSABLE) ?? panel.current
       first?.focus()
     }
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') close.current() }
+    // Only the top overlay closes: one opened from inside another (an item's project
+    // context opened in full from the detail dialog) is the last in the page.
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const open = document.querySelectorAll('[data-overlay]')
+      if (open[open.length - 1] === layer.current) close.current()
+    }
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
@@ -45,7 +52,7 @@ export function Overlay({ onClose, label, className = '', children }: {
   }
 
   return (
-    <div data-overlay onClick={() => onClose()} className="fixed inset-0 z-90 flex items-center justify-center bg-shade/75 backdrop-blur-sm">
+    <div ref={layer} data-overlay onClick={() => onClose()} className="fixed inset-0 z-90 flex items-center justify-center bg-shade/75 backdrop-blur-sm">
       <div
         ref={panel}
         role="dialog"

@@ -468,12 +468,6 @@ export function useBoard() {
     highlight,
     workingId: workingTask?.id ?? null,
   }
-  const nextUp = (() => {
-    const at = plan.entries.findIndex(e => e.itemId === workingTask?.id)
-    const open = plan.entries.map((entry, i) => ({ entry, i })).filter(({ entry }) => !entry.done && entry.itemId !== workingTask?.id)
-    const next = open.find(({ i }) => i > at) ?? open[0]
-    return next ? { entry: next.entry, task: next.entry.itemId ? tasksById.get(next.entry.itemId) : undefined } : null
-  })()
 
   const actions: DayActions = {
     toggle: toggleEntry,
@@ -568,7 +562,7 @@ export function useBoard() {
     reviews, teamBlockers, progress, bridgeLoading, bridgeErrors, actionError, toast, booting,
     workingTask, modalTask, linkFor, reader, queueTab, dragId, dropTarget,
     // derived
-    planned, queueTasks, blockedTasks, openEntries, upNext, events, planView, nextUp, linkCandidates,
+    planned, queueTasks, blockedTasks, openEntries, upNext, events, planView, linkCandidates,
     unplannedCount, countOf, sprintHeader, sprintDay, sprintLength, sprintDaysLeft, tickerItems, calendarItems,
     bootSteps, bootSummary,
     // actions

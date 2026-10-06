@@ -174,7 +174,7 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 **Working on an item:**
 - Starting an item shows it in Flow's Working card, or in Scan's pane. Marking it done highlights the next plan entry.
 
-**Working Space and detail modal:** both show the same cockpit pane (`src/ui/cockpit/CockpitPane.tsx`), the working one with a green "Working" marker.
+**Working card, Scan's pane and the detail modal:** all show the same cockpit pane (`src/ui/cockpit/CockpitPane.tsx`), the working one with a green "Working" marker.
 - **Header:** type, ref, source, state, "Open in ADO/Notion ↗" and "Ticket ↗", priority, points, sprint and avatar.
 - **Action bar, by the item's lane:** queue → ▶ Start and ＋ Plan (＋ Claim and plan for a Pulse item; "In today's plan" instead when it already is); today → Start and Block; working → Return to plan (draggable back to the queue) and Block; blocked → Unblock. ✓ Done is added wherever the source can be written to. In the modal the buttons follow the item as its lane changes.
 - **Body:** title, description, checklist and notes, with dev links, project context and linked items beside them (below them when the pane is narrow, using a container query). Dev links and project context load for any item opened, not only the one being worked on, and the pane is keyed by the item so notes and ticks don't carry over to the next.
@@ -186,17 +186,17 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **Linked items:** ADO child and related work items (the parent stays under Project Context), plus loaded items that name this one by ref (`US-12345`, `#12345`, `BLUEADS-222`, `SW-4021`) or are named by it. Matching is on ref text only. Items on the board open in the detail view; others link out to ADO.
 - **Notes:** one note per item, saved with SAVE NOTE (Ctrl or ⌘ + Enter). On a story it is a single ADO comment starting with `[Dev Dashboard note]`, edited in place on later saves. On a Notion item it is the "Dashboard notes" section of the item's page. Unsaved text is kept while you switch tasks.
 
-**Scan layout (new, at `/?ui=scan` while the layouts are built; `src/modes/scan/`):** a list on the left and the selected thing in full on the right. Focus is the selection: j and k move through the list and the pane follows.
+**Scan layout (`src/modes/scan/`; `/?ui=scan` shows it until a layout is picked in the header):** a list on the left and the selected thing in full on the right. Focus is the selection: j and k move through the list and the pane follows.
 - **Lists (tabs):** Plan, Queue (with a tab per source and its unplanned count), Next (Up next, with its reasons), Reviews, Blocked, and Team for a lead. Counts show on each tab. Switching lists clears the selection, so the pane shows what is being worked on, or nothing.
 - **The pane:** the cockpit pane for an item (a linked plan entry shows its item); an entry pane for a plan entry with no item (link it, confirm a suggestion, tick or remove it); a pull request pane (open in Azure DevOps); a team pane (a developer's update and blocked stories). The selection is a typed value (entry, task, review or team), so ids of different kinds can't be confused.
 - **Keys:** one table (`src/ui/keymap.ts`) drives the row handlers and the footer hints, and a test presses every key in it. Row keys are Enter, s, t, x or space, d, b, Delete and Alt+↑/↓; `p q n r` jump to the Plan, Queue, Next and Reviews lists and focus the first row. Enter on a row moves focus into the pane (an unlinked entry opens the link picker, a review opens the pull request); Esc in the pane returns to the row. The footer shows only keys some row in the current list responds to. Keys are ignored with Ctrl, Cmd or Alt, while an overlay is open, and while typing in a field.
-- **Drag and drop:** task and plan rows drag; the Plan, Blocked and Queue tabs accept drops (add to plan, block, return to queue) and highlight while dragging; the pane accepts a drop to start it. Plan rows reorder by dropping one on another.
-- **Narrow windows (under 900px):** the list fills the width and clicking a row opens the pane as a full-width sheet with "← List" (Esc also returns). The header's temporary theme toggles hide under 1100px.
+- **Drag and drop:** task and plan rows drag; the Plan, Blocked and Queue tabs accept drops (add to plan, block, return to queue) and highlight while a drag is over them; the pane accepts a drop to start it. A plan row dropped on Blocked blocks its item, on Queue removes it from the plan, and on the pane starts its item. Plan rows reorder by dropping one on another.
+- **Narrow windows (under 900px):** the list fills the width and clicking a row opens the pane as a full-width sheet with "← List" (Esc also returns, to the selected row). Under 1100px the header folds Planned and Blocked into one chip and shows only the time.
 - **Overlays:** the reader (brief, team items and dates, calendar, standup draft), the link picker and an item's full view use the shared overlay with a focus trap; the toast and the error banner come from the shared components.
 
 **Header, layouts and look (`src/ui/prefs.tsx`, `LookControls.tsx`, `theme.ts`):** the header's switcher chooses Auto, Scan or Flow; the Look menu chooses theme (Dark, Light, System), density (comfortable, compact) and the HUD ornaments. They are saved per developer in `devDashboard.ui.<email>` as `{ theme, density, layout, hud }` and applied to `<html>` as `data-theme`, `data-density` and `data-hud`; changing the developer loads theirs. Defaults: Dark, comfortable, Auto, no ornaments. Switching layouts keeps everything, because the board sits above them and note drafts live outside the layouts.
 
-**Flow layout (new, at `/?ui=flow` while the layouts are built; `src/modes/flow/`):** the day as one centred column (max 720px), read top to bottom.
+**Flow layout (`src/modes/flow/`; `/?ui=flow` shows it until a layout is picked in the header):** the day as one centred column (max 720px), read top to bottom.
 - **Sections:** the day header (date, sprint line, brief chip, standup draft, story progress, and a day strip `7 to do · 1 working · 1 blocked · 0 done today` whose parts scroll to their sections); Team today (leads); Today's plan; Working; Blocked (shown when anything is blocked, or while dragging); Up next; Reviews waiting; Coming up; Team notes.
 - **Plan rows** tick, start, block, remove and reorder (drag, or Alt+↑/↓). Enter or a click expands a row in place into a compact cockpit (dev links and context below the notes) with "Open full" (the dialog) and Collapse; an unlinked entry expands to its suggestion and link controls. Esc collapses it and returns focus to the row. Enter on an unlinked row opens the link picker.
 - **Working** shows the full cockpit. Up next, Blocked and the drawer open an item in the dialog.
@@ -211,10 +211,11 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 
 **Header:** the sprint name and dates, the sprint day (`10/14`), open plan entries, the Blocked count, the clock and date, and a TEMP developer switcher.
 
-**Reader overlay:** opened from the day header and sections ("Today's brief is in", BRIEF ⤢, CALENDAR ⤢). It has three tabs and shows content at 1.15× size; Esc or a click outside closes it.
+**Reader overlay (`src/ui/Reader.tsx`):** opened from the day header and sections (the brief chip, Standup draft, Brief ⤢, Calendar ⤢) and Scan's footer. It has four tabs; Esc or a click outside closes it.
 - **Daily Brief:** the responsibilities and aging items, or a lead's Leadership Summary. Lines that @mention a Task show `DEV-… ↗` and open it.
 - **Team Items & Dates:** team items plus deadlines starting or ending within 14 days.
 - **Sprint Calendar:** Deadlines and Milestones through the sprint end plus 42 days, with bars showing where each falls in the sprint.
+- **Standup Draft:** the editable update described under Standup draft above.
 
 Stories closed/committed comes from the ADO query, which includes closed items for this; the board still hides Closed and Removed stories.
 
@@ -231,7 +232,7 @@ Stories closed/committed comes from the ADO query, which includes closed items f
   - `BRIDGE_REFRESH_MS`, `CONTEXT_REFRESH_MS`
   - `STALE_STANDUP_DAYS` (6), `DEADLINE_TICKER_DAYS` (14), `CALENDAR_LOOKAHEAD_DAYS` (42)
   - `TEST_DEVELOPERS`
-- `src/App.tsx`: `UNDO_MS` (6000, the undo window), `RELATION_FIELDS`.
+- `src/board/constants.ts`: `UNDO_MS` (6000, the undo window). `src/ui/cockpit/ProjectContext.tsx`: `RELATION_FIELDS`.
 - `src/plan.ts`: `LINK_AT` (0.6), `SUGGEST_AT` (0.4), `LINK_MARGIN` (0.1) and `DUPLICATE_AT` (0.8) for title matching.
 - `src/ranking.ts`: `WEIGHTS` for each "Up next" signal, and `SPRINT_ENDING_DAYS` (3).
 - `src/schedule.ts`: `COMING_UP_DAYS` (21).
@@ -241,8 +242,8 @@ Stories closed/committed comes from the ADO query, which includes closed items f
 **Styling (design tokens in `src/index.css`):**
 - **Where values live:** raw values are CSS variables on `:root` (the dark theme, also `[data-theme='dark']`), and `[data-theme='light']` overrides every one of them. `@theme inline` maps them to Tailwind utilities such as `bg-surface`, `text-muted`, `border-line` and `text-meta`.
 - **No hardcoded colours:** components and classes use tokens only. `--tint` and `--shade` give the washes that lighten or darken a surface (`bg-tint/5`, `bg-shade/40`). Hover and focus washes, card and drop-target colours, shadows, scrollbar and the boot screen (`--boot-bg`, `--scanline`, `--glow-text`…) are tokens too, so the boot screen follows the theme: a CRT in dark, plain in light.
-- **Theme and density:** `src/ui/theme.ts` loads and saves a developer's look (`devDashboard.ui.<email>`: theme dark, light or system; density comfortable or compact; layout auto, scan or flow) and applies `data-theme` and `data-density` to `<html>` before the first paint. The only layout today is dark-only, so `FORCE_DARK` keeps it dark whatever is saved; turn it off when the new layouts ship. `compact:` is a Tailwind variant for the compact density.
-- **Shared components (`src/ui/`, not yet used by the app):** `atoms.tsx` has `Chip` (neutral unless it reports a status), `TypeChip`, `Ref`, `PriorityBadge`, `Avatar`, `SectionLabel`, `Kbd`, `Button` (quiet, primary, done, danger), `Checkbox` (a real `role="checkbox"`), `Tabs` (arrow keys, Home and End), `EmptyState`, `ErrorNote` (announced, optionally dismissible), `PrStatus` and `BuildStatus`. `Overlay.tsx` is a labelled modal that traps Tab, closes on Esc or an outside click and returns focus to what opened it; `Toast.tsx` is the announced message with Undo. `labels.ts` holds the words and tones (priority, type, PR and build status) as plain functions. Colour carries status only, and Inter is used except for refs, counts, chips and section labels. `/?ui=atoms` shows them all in either theme and density.
+- **Theme and density:** `src/ui/theme.ts` loads and saves a developer's look (`devDashboard.ui.<email>`: theme dark, light or system; density comfortable or compact; layout auto, scan or flow; the HUD ornaments on or off) and applies `data-theme`, `data-density` and `data-hud` to `<html>` before the first paint. `compact:` is a Tailwind variant for the compact density.
+- **Shared components (`src/ui/`, used by both layouts):** `atoms.tsx` has `Chip` (neutral unless it reports a status), `TypeChip`, `Ref`, `PriorityBadge`, `Avatar`, `SectionLabel`, `Kbd`, `Button` (quiet, primary, done, danger), `Checkbox` (a real `role="checkbox"`), `Tabs` (arrow keys, Home and End), `RadioGroup`, `EmptyState`, `ErrorNote` (announced, optionally dismissible), `PrStatus` and `BuildStatus`. `Overlay.tsx` is a labelled modal that traps Tab, closes on Esc (only the top one, when one opens from another) or an outside click and returns focus to what opened it; `Toast.tsx` is the announced message with Undo. `labels.ts` holds the words and tones (priority, type, PR and build status) as plain functions. Colour carries status only, and Inter is used except for refs, counts, chips and section labels. `/?ui=atoms` shows them all in either theme and density.
 - **Checking it:** `npm run contrast` tests every text token against every surface in both themes (AA, 4.5:1) and fails otherwise; the same check runs in `npm test`. `/?ui=tokens` shows every token, the type scale, the shared classes and a boot sample, in either theme and density (`&theme=light&density=compact` picks the look from the address).
 - **Type scale:**
 

@@ -53,13 +53,10 @@
 
   /* Surfaces and states. */
   --panel-top: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), transparent);
-  --panel-head-bg: rgba(0, 212, 255, 0.04);
   --chip-bg: rgb(255 255 255 / 0.04);
   --row-hover: rgb(255 255 255 / 0.02);
   --accent-wash: rgba(0, 212, 255, 0.05);
   --accent-flash: rgba(0, 212, 255, 0.14);
-  --card-line: rgba(0, 180, 220, 0.14);
-  --card-line-hover: rgba(0, 212, 255, 0.4);
   --scroll-thumb: rgba(0, 212, 255, 0.22);
   --scroll-thumb-hover: rgba(0, 212, 255, 0.45);
 
@@ -113,13 +110,10 @@
   --shade: #1a2030;
 
   --panel-top: none;
-  --panel-head-bg: rgba(0, 107, 138, 0.05);
   --chip-bg: rgb(0 0 0 / 0.04);
   --row-hover: rgb(0 0 0 / 0.03);
   --accent-wash: rgba(0, 107, 138, 0.06);
   --accent-flash: rgba(0, 107, 138, 0.14);
-  --card-line: rgba(0, 0, 0, 0.1);
-  --card-line-hover: rgba(0, 107, 138, 0.45);
   --scroll-thumb: rgba(0, 0, 0, 0.18);
   --scroll-thumb-hover: rgba(0, 0, 0, 0.32);
 
@@ -275,7 +269,9 @@
     background: var(--panel-top);
   }
 
-  .drop-zone[data-drop='on'] {
+  /* Scan's list tabs are drop targets too. */
+  .drop-zone[data-drop='on'],
+  [role='tab'][data-drop='on'] {
     border-color: var(--drop-line) !important;
     background: var(--drop-wash) !important;
     box-shadow: 0 0 20px var(--drop-glow) !important;

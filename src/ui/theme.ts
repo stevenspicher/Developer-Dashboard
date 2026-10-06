@@ -1,4 +1,4 @@
-import { DEVELOPER_STORAGE_KEY } from '../bridge'
+import { loadDeveloper } from '../bridge'
 
 // The look a developer has chosen: theme, density, layout and the HUD ornaments.
 // Saved per developer in this browser (devDashboard.ui.<email>) and applied to
@@ -70,8 +70,8 @@ export function applyPrefs(prefs: UiPrefs, systemDark: boolean | null = systemPr
 }
 
 // Applied before the first paint, so the boot screen already has the saved look.
+// The developer is the one the board will show (the first test developer when
+// none is saved), so the look doesn't change once the board loads.
 export function applySavedPrefs() {
-  let developer = ''
-  try { developer = localStorage.getItem(DEVELOPER_STORAGE_KEY) ?? '' } catch { /* storage unavailable */ }
-  applyPrefs(loadPrefs(developer))
+  applyPrefs(loadPrefs(loadDeveloper()))
 }

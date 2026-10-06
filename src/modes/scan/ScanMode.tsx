@@ -8,6 +8,8 @@ import BootScreen from '../../BootScreen'
 import { longDate as formatLongDate } from '../../schedule'
 import { buildStandupDraft } from '../../standup'
 import { StandupDraft } from '../../StandupDraft'
+import type { DropZone } from '../../board/types'
+import type { PlanEntry } from '../../plan'
 import type { Task } from '../../types'
 import { Button, EmptyState, ErrorNote, Kbd, Tabs } from '../../ui/atoms'
 import { CockpitContext } from '../../ui/cockpit/context'
@@ -18,7 +20,7 @@ import type { Filter } from '../../ui/keymap'
 import { LinkPicker } from '../../ui/LinkPicker'
 import { DetailModal } from '../../ui/DetailModal'
 import { BriefView, CalendarView, Reader, TickerView } from '../../ui/Reader'
-import { PlanListRow, ReviewListRow, TaskListRow, TeamListRow } from '../../ui/rows'
+import { ENTRY_DRAG, PlanListRow, ReviewListRow, TaskListRow, TeamListRow } from '../../ui/rows'
 import type { Handlers } from '../../ui/rows'
 import { Toast } from '../../ui/Toast'
 import { useMediaQuery } from '../../ui/useMediaQuery'
@@ -60,7 +62,7 @@ export default function ScanMode() {
     requestAnimationFrame(() => {
       const pane = paneRef.current
       // The action buttons first: they are what Enter on a row is usually for.
-      ;(pane?.querySelector<HTMLElement>('[role=toolbar] button') ?? pane?.querySelector<HTMLElement>('a[href], textarea'))?.focus()
+      ;(pane?.querySelector<HTMLElement>('[role=toolbar] button') ?? pane?.querySelector<HTMLElement>('a[href], textarea') ?? pane)?.focus()
     })
   }
 
@@ -154,25 +156,31 @@ export default function ScanMode() {
   const hints = hintsFor(items.flatMap(i => Object.entries(i.handlers).filter(([, fn]) => fn).map(([action]) => action as never)))
 
   // ── Keys that act on the whole layout.
-  const openFilter = (next: Filter) => {
+  // From a shortcut, focus moves to the list's first row; from the tabs it stays
+  // on the tab, so the arrow keys can go on moving between tabs.
+  const openFilter = (next: Filter, focusList = true) => {
     setFilter(next)
     setSelection(null) // the pane follows the new list, or shows what is being worked on
     setSheet(false)
-    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-rows="scan"] [data-row]')?.focus())
+    if (focusList) requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-rows="scan"] [data-row]')?.focus())
   }
-  const latest = useRef({ openFilter, selection, paneHasFocus: () => false as boolean })
-  latest.current = { openFilter, selection, paneHasFocus: () => !!paneRef.current?.contains(document.activeElement) }
+  const latest = useRef({ openFilter, selection, paneOnly: false, paneHasFocus: () => false as boolean })
+  latest.current = { openFilter, selection, paneOnly: !wide && sheet, paneHasFocus: () => !!paneRef.current?.contains(document.activeElement) }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (booting || e.metaKey || e.ctrlKey || e.altKey || document.querySelector('[data-overlay]')) return
       if ((e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return
       const target = filterForKey(e.key)
       if (target) { latest.current.openFilter(target); e.preventDefault(); return }
-      if (e.key === 'Escape' && latest.current.paneHasFocus()) {
+      // Esc from the pane (or from the sheet that replaces the list in a narrow
+      // window) goes back to the selected row, once the list is showing again.
+      if (e.key === 'Escape' && (latest.current.paneHasFocus() || latest.current.paneOnly)) {
         const s = latest.current.selection
-        const row = (s && document.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(rowId(s))}"]`)) ?? document.querySelector<HTMLElement>('[data-rows="scan"] [data-row]')
-        row?.focus()
         setSheet(false)
+        requestAnimationFrame(() => {
+          const row = (s && document.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(rowId(s))}"]`)) ?? document.querySelector<HTMLElement>('[data-rows="scan"] [data-row]')
+          row?.focus()
+        })
         e.preventDefault()
       }
     }
@@ -225,11 +233,29 @@ export default function ScanMode() {
     { id: 'blocked' as Filter, label: 'Blocked', count: blockedTasks.length },
     ...(lead ? [{ id: 'team' as Filter, label: 'Team', count: team.members.length }] : []),
   ]
-  const dropFor: Partial<Record<Filter, 'today' | 'blocked' | 'queue'>> = { plan: 'today', blocked: 'blocked', queue: 'queue' }
+  // A plan row dropped on a tab or the pane acts on its entry, or the item it is
+  // linked to: Blocked blocks it, Queue takes it out of the plan, the pane starts it.
+  const entryDrop = (zone: DropZone, onEntry?: (entry: PlanEntry, task: Task | undefined) => void) => {
+    const base = actions.dropProps(zone)
+    return {
+      ...base,
+      onDrop: (e: React.DragEvent<HTMLElement>) => {
+        const id = e.dataTransfer.getData(ENTRY_DRAG)
+        const entry = id ? plan.entries.find(x => x.id === id) : undefined
+        if (entry) onEntry?.(entry, entry.itemId ? tasksById.get(entry.itemId) : undefined)
+        base.onDrop?.(e)
+      },
+    }
+  }
+  const dropFor: Partial<Record<Filter, ReturnType<typeof entryDrop>>> = {
+    plan: entryDrop('today'),
+    blocked: entryDrop('blocked', (_, task) => { if (task) actions.block(task) }),
+    queue: entryDrop('queue', entry => actions.remove(entry)),
+  }
 
   const emptyList = (() => {
     if (items.length > 0) return null
-    if (filter === 'plan') return <EmptyState title="Nothing planned yet" hint={BRIEFLESS_PLAN} />
+    if (filter === 'plan') return <EmptyState title="Nothing planned yet" hint={briefData?.mode === 'brief' || lead ? 'Add items from Next, or from the queue.' : BRIEFLESS_PLAN} />
     if (filter === 'queue') {
       if (bridgeLoading && QUEUES.some(q => q.source === queueTab)) return <EmptyState title="Loading…" />
       return <EmptyState title={countOf(queueTab) === 0 ? 'No items in this queue' : 'Everything here is in your plan'} />
@@ -267,12 +293,9 @@ export default function ScanMode() {
                 dense
                 tabs={tabs}
                 value={filter}
-                onChange={openFilter}
+                onChange={next => openFilter(next, false)}
                 className="shrink-0 overflow-x-auto px-1"
-                tabProps={id => {
-                  const zone = dropFor[id]
-                  return zone ? (actions.dropProps(zone) as React.HTMLAttributes<HTMLButtonElement>) : {}
-                }}
+                tabProps={id => (dropFor[id] ?? {}) as React.HTMLAttributes<HTMLButtonElement>}
               />
               {filter === 'queue' && (
                 <Tabs
@@ -307,7 +330,7 @@ export default function ScanMode() {
           )}
 
           {showPane && (
-            <main ref={paneRef} aria-label="Selected item" className="flex min-h-0 min-w-0 flex-1 flex-col" {...(actions.dropProps('working') as React.HTMLAttributes<HTMLElement>)}>
+            <main ref={paneRef} tabIndex={-1} aria-label="Selected item" className="drop-zone flex min-h-0 min-w-0 flex-1 flex-col outline-none" {...(entryDrop('working', (_, task) => { if (task) actions.start(task) }) as React.HTMLAttributes<HTMLElement>)}>
               {!wide && (
                 <div className="shrink-0 border-b border-line px-3 py-1.5">
                   <Button onClick={() => { setSheet(false); requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-rows="scan"] [data-row]')?.focus()) }}>← List</Button>

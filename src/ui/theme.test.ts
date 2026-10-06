@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { TEST_DEVELOPERS } from '../bridge'
+
 import {
   DEFAULT_PREFS, SCAN_MIN_WIDTH, applyPrefs, applySavedPrefs, loadPrefs, resolveLayout, resolveTheme, savePrefs,
 } from './theme'
@@ -67,9 +69,15 @@ describe('applying', () => {
   })
 
   it('applySavedPrefs reads the saved developer\'s preferences', () => {
-    localStorage.setItem('devDashboard.developer', 'a@x.com')
-    savePrefs('a@x.com', { theme: 'dark', density: 'compact', layout: 'auto', hud: false })
+    localStorage.setItem('devDashboard.developer', TEST_DEVELOPERS[1].email)
+    savePrefs(TEST_DEVELOPERS[1].email, { theme: 'dark', density: 'compact', layout: 'auto', hud: false })
     applySavedPrefs()
     expect(document.documentElement.dataset.density).toBe('compact')
+  })
+
+  it('applySavedPrefs uses the developer the board defaults to when none is saved', () => {
+    savePrefs(TEST_DEVELOPERS[0].email, { theme: 'light', density: 'comfortable', layout: 'auto', hud: false })
+    applySavedPrefs()
+    expect(document.documentElement.dataset.theme).toBe('light')
   })
 })

@@ -48,9 +48,10 @@ export function Header({ sprintLine, developer, onDeveloper, sprintDay, planned,
 
 function Stat({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'muted' | 'danger' }) {
   return (
-    <div className="text-center">
-      <dd className={`font-mono text-stat leading-none ${tone === 'danger' ? 'text-danger-fg' : tone === 'muted' ? 'text-muted' : 'text-ink'}`}>{value}</dd>
+    // The label comes first for screen readers (a <dt> before its <dd>), and shows below the value.
+    <div className="flex flex-col-reverse text-center">
       <dt className="mt-0.5 text-badge text-muted">{label}</dt>
+      <dd className={`font-mono text-stat leading-none ${tone === 'danger' ? 'text-danger-fg' : tone === 'muted' ? 'text-muted' : 'text-ink'}`}>{value}</dd>
     </div>
   )
 }
