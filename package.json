@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "format": "oxfmt",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "contrast": "node scripts/contrast.ts"
   },
   "dependencies": {
     "react": "^19.0.0",

@@ -223,7 +223,7 @@ function DetailModal({ task, planned, onClose, onStart, onAdd, onDone }: {
 
 function MetaBadge({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xs border border-line-soft bg-white/[0.04] px-2 py-1">
+    <div className="rounded-xs border border-line-soft bg-tint/[0.04] px-2 py-1">
       <div className="label text-badge">{label}</div>
       <div className="font-mono text-note text-fg">{value}</div>
     </div>
@@ -338,7 +338,7 @@ function RelatedCard({ entity, onOpen }: { entity: RelatedEntity; onOpen: () => 
     <div
       onClick={entity.error ? undefined : onOpen}
       title={entity.error ? undefined : 'Click to expand'}
-      className={`rounded-xs border border-accent/15 bg-black/30 px-2.5 py-2 ${entity.error ? '' : 'cursor-zoom-in hover:border-accent/35'}`}
+      className={`rounded-xs border border-accent/15 bg-shade/30 px-2.5 py-2 ${entity.error ? '' : 'cursor-zoom-in hover:border-accent/35'}`}
     >
       <div className="label mb-1 text-badge">{relationLabel(entity)}</div>
       {entity.error ? (
@@ -556,7 +556,7 @@ export default function ClassicApp() {
     <div className="flex h-screen flex-col overflow-hidden bg-bg font-sans">
 
       {/* ── Header ── */}
-      <header className="z-10 flex h-[52px] shrink-0 items-center gap-4 border-b border-line bg-black/40 px-4">
+      <header className="z-10 flex h-[52px] shrink-0 items-center gap-4 border-b border-line bg-shade/40 px-4">
         <div className="flex shrink-0 items-center gap-2.5">
           <div className="flex size-8 items-center justify-center rounded-xs border border-accent/40 bg-accent/10 font-mono text-stat font-bold text-accent">◈</div>
           <div>
@@ -598,7 +598,7 @@ export default function ClassicApp() {
           onDragLeave={handleDragLeave}
         >
           {/* Header */}
-          <div className="shrink-0 border-b border-line bg-black/25 px-2.5 pt-2.5">
+          <div className="shrink-0 border-b border-line bg-shade/25 px-2.5 pt-2.5">
             <div className="mb-2 flex items-center">
               <span className="label font-bold text-accent">QUEUES</span>
               <span className="ml-auto font-mono text-meta text-muted" title="Items not in today's plan">{unplannedCount()} not planned</span>
@@ -734,7 +734,7 @@ export default function ClassicApp() {
       )}
 
       {toast && (
-        <div role="status" className="fixed bottom-5 left-1/2 z-150 flex -translate-x-1/2 items-center gap-4 rounded-sm border border-accent/30 bg-surface px-4 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.6)]">
+        <div role="status" className="fixed bottom-5 left-1/2 z-150 flex -translate-x-1/2 items-center gap-4 rounded-sm border border-accent/30 bg-surface px-4 py-2 shadow-[0_8px_30px_var(--shadow-toast)]">
           <span className="text-body text-fg">{toast.text}</span>
           {toast.undo && (
             <button
@@ -780,7 +780,7 @@ function BriefPanel({ brief, tasks, onOpen, today }: {
     return (
       <div
         onClick={task ? e => { e.stopPropagation(); onOpen(line) } : undefined}
-        className={`flex items-start gap-2 border-b border-line-soft py-1 ${task ? 'cursor-pointer hover:bg-white/[0.03]' : ''}`}
+        className={`flex items-start gap-2 border-b border-line-soft py-1 ${task ? 'cursor-pointer hover:bg-tint/[0.03]' : ''}`}
       >
         <span className={`mt-px min-w-4 shrink-0 font-mono text-meta ${tone}`}>{index !== undefined ? `${index + 1}.` : '•'}</span>
         <span className="text-body text-fg">
@@ -868,10 +868,10 @@ function Overlay({ onClose, className = '', children }: { onClose: () => void; c
   }, [onClose])
 
   return (
-    <div data-overlay onClick={onClose} className="fixed inset-0 z-90 flex items-center justify-center bg-black/75 backdrop-blur-sm">
+    <div data-overlay onClick={onClose} className="fixed inset-0 z-90 flex items-center justify-center bg-shade/75 backdrop-blur-sm">
       <div
         onClick={e => e.stopPropagation()}
-        className={`panel hud-corner flex max-w-[calc(100vw-32px)] flex-col border-accent/35 shadow-[0_0_60px_rgba(0,212,255,0.12),0_0_120px_rgba(0,0,0,0.8)] ${className}`}
+        className={`panel hud-corner flex max-w-[calc(100vw-32px)] flex-col border-accent/35 shadow-[0_0_60px_var(--glow),0_0_120px_var(--shadow-modal)] ${className}`}
       >
         {children}
       </div>
@@ -927,7 +927,7 @@ function CalendarList({ items, sprint, today }: { items: Deadline[]; sprint: Spr
           </span>
         </div>
         {inSprint(d) && sprintLen > 0 && (
-          <div className="relative mt-1 h-[3px] rounded-full bg-white/5">
+          <div className="relative mt-1 h-[3px] rounded-full bg-tint/5">
             <div className="absolute -top-0.5 h-[7px] w-px bg-accent" style={{ left: `${pct(today)}%` }} />
             <div
               className={`absolute h-[3px] rounded-full ${active ? 'bg-ok' : 'bg-accent/50'}`}

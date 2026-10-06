@@ -22,7 +22,8 @@ npm run test:watch
 ```
 
 Tests sit next to the code (`src/*.test.ts`). A test that needs `localStorage` or the DOM
-starts with `// @vitest-environment jsdom`. `npx tsc --noEmit` checks types.
+starts with `// @vitest-environment jsdom`. `npx tsc --noEmit` checks types, `npm run contrast` checks the colour tokens
+in both themes, and `/?ui=tokens` shows them.
 
 ## Dependencies
 

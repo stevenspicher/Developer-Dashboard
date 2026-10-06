@@ -151,7 +151,7 @@ function LinkRow({ kind, href, title, meta, badge }: {
   badge?: { label: string; tone: string } | null
 }) {
   return (
-    <a href={href} target="_blank" rel="noreferrer" className="group flex items-baseline gap-2 rounded-xs px-1 py-1 hover:bg-white/[0.04]">
+    <a href={href} target="_blank" rel="noreferrer" className="group flex items-baseline gap-2 rounded-xs px-1 py-1 hover:bg-tint/[0.04]">
       <span className="w-12 shrink-0 font-mono text-badge tracking-label text-muted">{kind}</span>
       <span className="min-w-0 flex-1 break-words text-note text-fg group-hover:text-ink">
         {title}
@@ -218,7 +218,7 @@ function ItemRow({ kind, title, state, onOpen, href }: {
       {state && <span className="shrink-0 font-mono text-meta text-muted">{state}</span>}
     </>
   )
-  const cls = 'group flex w-full items-baseline gap-2 rounded-xs px-1 py-1 text-left hover:bg-white/[0.04]'
+  const cls = 'group flex w-full items-baseline gap-2 rounded-xs px-1 py-1 text-left hover:bg-tint/[0.04]'
   if (onOpen) return <button className={cls} onClick={onOpen}>{body}</button>
   if (href) return <a className={cls} href={href} target="_blank" rel="noreferrer">{body}</a>
   return <div className={cls}>{body}</div>

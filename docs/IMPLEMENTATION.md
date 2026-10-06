@@ -220,7 +220,10 @@ Stories closed/committed comes from the ADO query, which includes closed items f
 - `src/BootScreen.tsx`: `GREETINGS` and the timing constants.
 
 **Styling (design tokens in `src/index.css`):**
-- **Where values live:** raw values are CSS variables on `:root`, so a light or high-contrast theme only needs to override them. `@theme inline` maps them to Tailwind utilities such as `bg-surface`, `text-muted`, `border-line` and `text-meta`.
+- **Where values live:** raw values are CSS variables on `:root` (the dark theme, also `[data-theme='dark']`), and `[data-theme='light']` overrides every one of them. `@theme inline` maps them to Tailwind utilities such as `bg-surface`, `text-muted`, `border-line` and `text-meta`.
+- **No hardcoded colours:** components and classes use tokens only. `--tint` and `--shade` give the washes that lighten or darken a surface (`bg-tint/5`, `bg-shade/40`). Hover and focus washes, card and drop-target colours, shadows, scrollbar and the boot screen (`--boot-bg`, `--scanline`, `--glow-text`…) are tokens too, so the boot screen follows the theme: a CRT in dark, plain in light.
+- **Theme and density:** `src/ui/theme.ts` loads and saves a developer's look (`devDashboard.ui.<email>`: theme dark, light or system; density comfortable or compact; layout auto, scan or flow) and applies `data-theme` and `data-density` to `<html>` before the first paint. The only layout today is dark-only, so `FORCE_DARK` keeps it dark whatever is saved; turn it off when the new layouts ship. `compact:` is a Tailwind variant for the compact density.
+- **Checking it:** `npm run contrast` tests every text token against every surface in both themes (AA, 4.5:1) and fails otherwise; the same check runs in `npm test`. `/?ui=tokens` shows every token, the type scale, the shared classes and a boot sample, in either theme and density (`&theme=light&density=compact` picks the look from the address).
 - **Type scale:**
 
   | Token | Size | Use |

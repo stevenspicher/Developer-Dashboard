@@ -2,23 +2,37 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 
+/* Compact density: `compact:py-1` applies under <html data-density='compact'>. */
+@custom-variant compact (&:where([data-density='compact'], [data-density='compact'] *));
+
 /*
- * Design tokens. Raw values live on :root so a theme (light, high contrast)
- * can override them; @theme maps them to Tailwind utilities such as
- * bg-surface, text-muted, border-line and text-meta.
+ * Design tokens. Raw values live on :root so a theme can override them; @theme
+ * maps them to Tailwind utilities such as bg-surface, text-muted and text-meta.
  *
- * Every text colour is at least 4.5:1 against --bg and --surface (WCAG AA).
- * --faint is for borders, dots and decoration only, never for text.
+ * Themes: dark is the default (:root); light is [data-theme='light'], set on
+ * <html> by src/ui/theme.ts. Density is [data-density='compact'].
+ *
+ * Every text colour is at least 4.5:1 against --bg, --surface, --sunken and
+ * --raised (WCAG AA); `npm run contrast` checks both themes. --faint is for
+ * borders, dots and decoration only, never for text.
  *
  * Each colour has one meaning: accent = interactive or selected, ok = done or
  * active, warn = needs attention, danger = critical, blocked or failed.
+ * Components never hardcode a colour: use a token, or --tint / --shade for the
+ * washes that lighten or darken a surface (bg-tint/5, bg-shade/40).
  */
-:root {
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
   --bg: #060b14;
   --surface: #0d1626;
   --sunken: #08101c;
+  --raised: #111e30;
   --line: rgba(0, 200, 240, 0.16);
   --line-soft: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(0, 180, 220, 0.25);
+  --focus: rgba(0, 212, 255, 0.5);
 
   --ink: #e0f0ff;       /* titles            15.6:1 */
   --fg: #c8dff0;        /* body              13.2:1 */
@@ -32,6 +46,99 @@
   --danger: #ff3355;
   --danger-fg: #ff7a90; /* error text on dark panels */
   --phosphor: #7fe3ff;  /* boot terminal text */
+
+  /* Washes: --tint lightens a surface, --shade darkens it. */
+  --tint: #fff;
+  --shade: #000;
+
+  /* Surfaces and states. */
+  --panel-top: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), transparent);
+  --panel-head-bg: rgba(0, 212, 255, 0.04);
+  --chip-bg: rgb(255 255 255 / 0.04);
+  --row-hover: rgb(255 255 255 / 0.02);
+  --accent-wash: rgba(0, 212, 255, 0.05);
+  --accent-flash: rgba(0, 212, 255, 0.14);
+  --card-line: rgba(0, 180, 220, 0.14);
+  --card-line-hover: rgba(0, 212, 255, 0.4);
+  --scroll-thumb: rgba(0, 212, 255, 0.22);
+  --scroll-thumb-hover: rgba(0, 212, 255, 0.45);
+
+  /* Drop targets while dragging. */
+  --drop-line: rgba(0, 212, 255, 0.6);
+  --drop-wash: rgba(0, 212, 255, 0.05);
+  --drop-glow: rgba(0, 212, 255, 0.15);
+  --drop-danger-line: rgba(255, 51, 85, 0.6);
+  --drop-danger-wash: rgba(255, 51, 85, 0.05);
+  --drop-danger-glow: rgba(255, 51, 85, 0.15);
+
+  /* Overlays and toasts. */
+  --glow: rgba(0, 212, 255, 0.12);
+  --shadow-modal: rgba(0, 0, 0, 0.8);
+  --shadow-toast: rgba(0, 0, 0, 0.6);
+
+  /* The boot screen follows the theme: a CRT in dark, plain in light. */
+  --boot-bg: #03060c;
+  --scanline: rgba(0, 212, 255, 0.035);
+  --vignette: rgba(0, 0, 0, 0.65);
+  --glow-text: rgba(0, 212, 255, 0.35);
+  --glow-ok: rgba(0, 255, 136, 0.5);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f2f0ec;
+  --surface: #ffffff;
+  --sunken: #f7f5f1;
+  --raised: #ede9e3;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-soft: rgba(0, 0, 0, 0.05);
+  --line-strong: rgba(0, 0, 0, 0.14);
+  --focus: rgba(0, 107, 138, 0.5);
+
+  --ink: #1a2030;
+  --fg: #2a3344;
+  --dim: #4a5c70;
+  --muted: #5a6676;     /* the design's #718096 fails AA */
+  --faint: #a0aec0;     /* decoration only */
+
+  --accent: #006b8a;
+  --ok: #0b6e48;
+  --warn: #85570a;
+  --danger: #b91c1c;
+  --danger-fg: #b91c1c;
+  --phosphor: #006b8a;
+
+  --tint: #000;
+  --shade: #1a2030;
+
+  --panel-top: none;
+  --panel-head-bg: rgba(0, 107, 138, 0.05);
+  --chip-bg: rgb(0 0 0 / 0.04);
+  --row-hover: rgb(0 0 0 / 0.03);
+  --accent-wash: rgba(0, 107, 138, 0.06);
+  --accent-flash: rgba(0, 107, 138, 0.14);
+  --card-line: rgba(0, 0, 0, 0.1);
+  --card-line-hover: rgba(0, 107, 138, 0.45);
+  --scroll-thumb: rgba(0, 0, 0, 0.18);
+  --scroll-thumb-hover: rgba(0, 0, 0, 0.32);
+
+  --drop-line: rgba(0, 107, 138, 0.6);
+  --drop-wash: rgba(0, 107, 138, 0.06);
+  --drop-glow: rgba(0, 107, 138, 0.12);
+  --drop-danger-line: rgba(185, 28, 28, 0.55);
+  --drop-danger-wash: rgba(185, 28, 28, 0.06);
+  --drop-danger-glow: rgba(185, 28, 28, 0.12);
+
+  --glow: transparent;
+  --shadow-modal: rgba(26, 32, 48, 0.22);
+  --shadow-toast: rgba(26, 32, 48, 0.2);
+
+  --boot-bg: #f2f0ec;
+  --scanline: transparent;
+  --vignette: transparent;
+  --glow-text: transparent;
+  --glow-ok: transparent;
 }
 
 @theme inline {
@@ -51,6 +158,11 @@
   --color-danger: var(--danger);
   --color-danger-fg: var(--danger-fg);
   --color-phosphor: var(--phosphor);
+  --color-raised: var(--raised);
+  --color-line-strong: var(--line-strong);
+  --color-focus: var(--focus);
+  --color-tint: var(--tint);
+  --color-shade: var(--shade);
 
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -92,8 +204,8 @@
 
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.22); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.45); }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 }
 
 @layer components {
@@ -126,7 +238,7 @@
     padding: 0 6px;
     border: 1px solid var(--line-soft);
     border-radius: 2px;
-    background: rgb(255 255 255 / 0.04);
+    background: var(--chip-bg);
     color: var(--dim);
     white-space: nowrap;
   }
@@ -137,7 +249,7 @@
     font-size: var(--text-meta);
     letter-spacing: var(--tracking-label);
     color: var(--muted);
-    background: rgb(255 255 255 / 0.04);
+    background: var(--chip-bg);
     border: 1px solid var(--line-soft);
     border-radius: 2px;
     padding: 1px 8px;
@@ -159,7 +271,7 @@
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), transparent);
+    background: var(--panel-top);
   }
 
   .panel-header {
@@ -174,38 +286,38 @@
     text-transform: uppercase;
     color: var(--accent);
     border-bottom: 1px solid var(--line);
-    background: rgba(0, 212, 255, 0.04);
+    background: var(--panel-head-bg);
   }
 
   .task-card {
-    border-color: rgba(0, 180, 220, 0.14);
+    border-color: var(--card-line);
     cursor: grab;
     transition: border-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
     user-select: none;
   }
-  .task-card:hover { border-color: rgba(0, 212, 255, 0.4); }
+  .task-card:hover { border-color: var(--card-line-hover); }
   .task-card:active { cursor: grabbing; opacity: 0.7; transform: scale(0.98); }
 
   .drop-active,
   .drop-zone[data-drop='on'] {
-    border-color: rgba(0, 212, 255, 0.6) !important;
-    background: rgba(0, 212, 255, 0.05) !important;
-    box-shadow: 0 0 20px rgba(0, 212, 255, 0.15) !important;
+    border-color: var(--drop-line) !important;
+    background: var(--drop-wash) !important;
+    box-shadow: 0 0 20px var(--drop-glow) !important;
   }
   .drop-zone-blocked[data-drop='on'] {
-    border-color: rgba(255, 51, 85, 0.6) !important;
-    background: rgba(255, 51, 85, 0.05) !important;
-    box-shadow: 0 0 20px rgba(255, 51, 85, 0.15) !important;
+    border-color: var(--drop-danger-line) !important;
+    background: var(--drop-danger-wash) !important;
+    box-shadow: 0 0 20px var(--drop-danger-glow) !important;
   }
 
   /* Keyboard-navigable rows (plan, up next, queue cards). */
   .row { outline: none; }
-  .row:hover { background: rgb(255 255 255 / 0.02); }
+  .row:hover { background: var(--row-hover); }
   .row:focus-visible,
   .task-card:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: -1px;
-    background: rgba(0, 212, 255, 0.05);
+    background: var(--accent-wash);
   }
   /* Draws the eye to the next plan item after one is done. */
   .row-flash { animation: row-flash 2.4s ease-out; }
@@ -225,16 +337,16 @@
 }
 
 /* Boot screen: a darker CRT with scanlines, a vignette and phosphor glow. */
-.boot-screen { background: #03060c; }
+.boot-screen { background: var(--boot-bg); }
 .crt-scanlines {
-  background: repeating-linear-gradient(0deg, rgba(0, 212, 255, 0.035) 0px, rgba(0, 212, 255, 0.035) 1px, transparent 1px, transparent 3px);
+  background: repeating-linear-gradient(0deg, var(--scanline) 0px, var(--scanline) 1px, transparent 1px, transparent 3px);
 }
-.crt-vignette { background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.65) 100%); }
-.crt-glow { text-shadow: 0 0 6px rgba(0, 212, 255, 0.35); }
-.crt-glow-ok { text-shadow: 0 0 8px rgba(0, 255, 136, 0.5); }
+.crt-vignette { background: radial-gradient(ellipse at center, transparent 55%, var(--vignette) 100%); }
+.crt-glow { text-shadow: 0 0 6px var(--glow-text); }
+.crt-glow-ok { text-shadow: 0 0 8px var(--glow-ok); }
 
 @keyframes row-flash {
-  0%, 30% { background: rgba(0, 212, 255, 0.14); }
+  0%, 30% { background: var(--accent-flash); }
   100% { background: transparent; }
 }
 

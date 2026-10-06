@@ -85,7 +85,7 @@ export function MyDay({ today, sprint, brief, planView, upNext, reviews, events,
               {entries.map(e => <PlanRow key={e.id} entry={e} view={planView} actions={actions} today={today} />)}
             </div>
             {entries.length === 0 && (
-              <div className="rounded-xs border border-dashed border-white/10 px-3 py-4 text-note text-muted">
+              <div className="rounded-xs border border-dashed border-tint/10 px-3 py-4 text-note text-muted">
                 {briefData?.mode === 'brief' || lead
                   ? 'Nothing planned yet. Add items from Up next, or drag them in from the queues.'
                   : "Your standup responsibilities show up here once today's brief is posted. Meanwhile, add items from Up next."}

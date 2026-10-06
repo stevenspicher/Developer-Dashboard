@@ -597,6 +597,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 
 ### Phase 1: token layer and theme switch
 
+**Status (2026-10-06): built.** `index.css` has the dark and light token blocks and no hardcoded colours; `src/ui/theme.ts` stores and applies the preferences (layout, theme, density); `npm run contrast` and `/?ui=tokens` check and show both themes; the boot screen follows the theme (Q5). Dark is unchanged: the computed styles of all 363 elements matched the previous build, with identical values. `FORCE_DARK` keeps the classic layout dark until the new layouts ship. The HUD ornaments (Q4) are still in place, and the option to turn them off is part of the theme picker in Phase 6.
+
 - **Files:** `src/index.css`; new `src/ui/theme.ts` (read and store `theme` and `density`, set `data-theme`/`data-density` on `<html>`); optional `scripts/contrast.mjs`.
 - **Build:** add the tokens in §4.3; tokenise the hardcoded colours listed in §4.2. Keep the classic view forced to dark (`data-theme='dark'` while `ui=classic`): it still uses `bg-black/…` utilities in places.
 - **Verify:** classic view unchanged in dark. Temporarily set `data-theme='light'` on a test page that renders a sample of chips, buttons and text tokens; check the contrast script passes for both themes.
