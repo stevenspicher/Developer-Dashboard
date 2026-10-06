@@ -14,6 +14,13 @@ npm run dev        # http://localhost:8443, proxies /bridge → localhost:3100, 
 Point the proxy elsewhere with `NOTION_BRIDGE_URL` / `ADO_BRIDGE_URL`.
 ADO User Stories are on by default and need ado-bridge connected to Azure DevOps (`ADO_PAT` in its `.env`). Start with `VITE_ADO_STORIES=false` to hide them.
 
+## Dependencies
+
+`package-lock.json` is the source of truth: the Docker build installs from it
+(`npm ci`), so change dependencies with `npm install` and commit the lockfile.
+`pnpm-lock.yaml` exists for Figma Make, which regenerates it, and isn't kept in
+sync by hand.
+
 ## Docker
 
 ```bash
