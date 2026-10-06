@@ -39,6 +39,7 @@ The bridge drives almost everything from `config/manifest.json`. Adding or retun
 | Solarwinds | Assignee Name | Text | which developer sees the ticket |
 | Solarwinds | State | Select | open states shown; Resolved hidden |
 | Solarwinds | Initiative, Issue, Analyst Issue | Relation | Working Space context |
+| ADS Tickets | Assignee | Text | which developer sees the ticket |
 | ADS Tickets | Status | Status | open states shown; Done hidden |
 | ADS Tickets | Priority | Select | Blocker/Critical, Major, Minor, Trivial |
 | ADS Tickets | Issue Key, Issue Type, Description, URL | Text, Select, Text, URL | card ref, detail and Jira link |
@@ -62,7 +63,7 @@ The bridge drives almost everything from `config/manifest.json`. Adding or retun
 | `sprint-developer-items` | Sprint Developer Items | Lists items where Mark Done = False and the Developer is the viewer or empty. `done: {Mark Done: true, Status: Done}`. No claimed state. |
 | `pulse-queue` | Pulse Queue | Claimable in Pending or Posted. `claimedState: In progress`, `releaseState: Pending`, `done: {Status: Done}`, assignee `Developer`. |
 | `solarwinds` | Solarwinds | `readOnly`. `assigneeTextProperty: Assignee Name`. Every State except Resolved is listed. |
-| `ads-tickets` | ADS Tickets | `readOnly`. No assignee property, so every developer sees the same tickets. Listed in Not started, To Do, Blocked, On Hold, Waiting for Information or Client Review; Done is hidden. |
+| `ads-tickets` | ADS Tickets | `readOnly`. `assigneeTextProperty: Assignee`. Listed in Not started, To Do, Blocked, On Hold, Waiting for Information or Client Review; Done is hidden. |
 | `team-initiatives`, `issues`, `analyst-issues` | relation targets | Read-only context. |
 | `deadlines-milestones` | Deadlines and Milestones | Read via `/databases/:slug/query`. |
 
@@ -137,7 +138,7 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 
 **Board behavior:**
 - **Lanes:** Todo, Working and Blocked are saved in localStorage per developer (`devDashboard.lanes.<email>`), so they survive reloads.
-| ADS | `ads-tickets` | Issue Key (`BLUEADS-222`), Priority, Description, Status, Jira link. Blocker and Critical = CRIT, Major = HIGH, Minor = MED, Trivial = LOW. | Read-only; lanes are dashboard-only. A team-wide queue, not filtered per developer |
+| ADS | `ads-tickets` | Issue Key (`BLUEADS-222`), Priority, Description, Status, Jira link. Only the assignee sees it. Blocker and Critical = CRIT, Major = HIGH, Minor = MED, Trivial = LOW. | Read-only; lanes are dashboard-only |
 - **Rebuilt on refresh:** each refresh rebuilds the bridge-backed cards from the bridge. Claimed Pulse items default to Todo.
 - **One item in Working:** dropping a new item there moves the previous one to Todo.
 - **Claim and release:** moves are shown immediately. If the claim or release fails, the card moves back and the queue panel shows a dismissible error.
