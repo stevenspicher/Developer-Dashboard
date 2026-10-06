@@ -123,26 +123,50 @@ New manifest fields:
 - `src/bridge.ts`: API client, the `QUEUES` adapters (Notion queues and ADO Stories), saved lanes, the ADO HTML-to-text conversion, date helpers, tunable constants.
 - `src/RichText.tsx`: renders description text with its line breaks and clickable links.
 - `src/BootScreen.tsx`: the terminal-style loading screen.
-- `src/App.tsx`: UI (queues, working space, brief, calendar, reader, overlays).
+- `src/App.tsx`: board state and wiring (queues, writes and undo, keyboard), the working space, and the overlays (detail, link picker, reader).
+- `src/MyDay.tsx`: the My Day view, plus the focus bar and plan rail shown while working on an item.
+- `src/plan.ts`: the day's plan: storage, carry-over, merging the standup, and linking entries to board items.
+- `src/ranking.ts`: the "Up next" ranking and its reasons.
+- `src/schedule.ts`: "Coming up" (including dates read from team items) and day arithmetic.
+- `src/keys.ts`: row keyboard shortcuts.
 - `src/index.css`: design tokens and shared classes (see Styling below).
 
 **Queues (left panel):**
 | Tab | Source | Card | Actions |
 |---|---|---|---|
-| Stories | ado-bridge `/workitems`: User Stories assigned to the developer in the current sprint's iteration (`Blue Digital\Sprint N YYYY`). Off unless the dev server starts with `VITE_ADO_STORIES=true`. | `US-{id}`, state, points, description, acceptance criteria. ADO priority 1 = HIGH, 2 = MED, 3+ = LOW. | Today or Working sets Active, Blocked sets Blocked, ✓ DONE sets Closed. Active stories start in Today and Blocked ones in Blocked. |
+| Stories | ado-bridge `/workitems`: User Stories assigned to the developer in the current sprint's iteration (`Blue Digital\Sprint N YYYY`). Off unless the dev server starts with `VITE_ADO_STORIES=true`. | `US-{id}`, state, points, description, acceptance criteria. ADO priority 1 = HIGH, 2 = MED, 3+ = LOW. | Adding to the plan or starting it sets Active, blocking sets Blocked, ✓ DONE sets Closed. Active stories start in the plan and Blocked ones in Blocked. |
 | Tasks | `sprint-developer-items` | `DEV-xxxxxx`, Notes, developer initials, `SPR-N`, standup age. HIGH if the standup is more than 6 days old. | ✓ DONE; lanes are dashboard-only |
-| Pulse | `pulse-queue` | `PULSE-xxxxxx`, Description, `SPR-N`. Priority MED for the current sprint, HIGH 1 sprint behind, CRIT 2 or more. | Drag out = claim, drag back = release, ✓ DONE |
+| Pulse | `pulse-queue` | `PULSE-xxxxxx`, Description, `SPR-N`. Priority MED for the current sprint, HIGH 1 sprint behind, CRIT 2 or more. | Adding to the plan, starting or dragging out claims it ("＋ CLAIM"); dragging back releases it; ✓ DONE |
 | Solarwinds | `solarwinds` | `SW-{Number}`, Priority, Description, State | Read-only; lanes are dashboard-only |
+| ADS | `ads-tickets` | Issue Key (`BLUEADS-222`), Priority, Description, Status, Jira link. Only the assignee sees it. Blocker and Critical = CRIT, Major = HIGH, Minor = MED, Trivial = LOW. | Read-only; lanes are dashboard-only |
 
 Zendesk has no queue yet, so its tab is hidden. The queues list only items that aren't in today's plan, and the tab counts do the same.
 
 **Board behavior:**
-- **Lanes:** Todo, Working and Blocked are saved in localStorage per developer (`devDashboard.lanes.<email>`), so they survive reloads.
-| ADS | `ads-tickets` | Issue Key (`BLUEADS-222`), Priority, Description, Status, Jira link. Only the assignee sees it. Blocker and Critical = CRIT, Major = HIGH, Minor = MED, Trivial = LOW. | Read-only; lanes are dashboard-only |
+- **Lanes:** Todo (now "in today's plan"), Working and Blocked are saved in localStorage per developer (`devDashboard.lanes.<email>`), so they survive reloads.
 - **Rebuilt on refresh:** each refresh rebuilds the bridge-backed cards from the bridge. Claimed Pulse items default to Todo.
-- **One item in Working:** dropping a new item there moves the previous one to Todo.
-- **Claim and release:** moves are shown immediately. If the claim or release fails, the card moves back and the queue panel shows a dismissible error.
-- **Mark done:** removes the card once the write succeeds.
+- **One item in Working:** starting a new item moves the previous one back to Todo.
+- **Writes with undo:** a Pulse claim or release and an ADO state change happen immediately and show a toast with UNDO, which reverses the write. If the write fails, the card moves back and the queue panel shows a dismissible error.
+- **Mark done:** the card leaves at once, and the write waits 6 seconds so the toast's UNDO (or unticking the plan entry) can cancel it. A pending done is sent straight away if the page closes or the developer is switched.
+- **No drag needed:** cards, plan entries and Up next rows have buttons, and keyboard shortcuts when focused: `j`/`k` move, `Enter` open, `s` start, `t` add to the plan, `x` tick, `d` done, `b` block, `Alt+↑/↓` reorder the plan, `Delete` remove from the plan. `p`, `n` and `q` jump to the plan, Up next and the queues; `Esc` switches between the item being worked on and My Day.
+
+**My Day (the centre when nothing is being worked on):**
+- **Header:** the date, the sprint day and working days left, whether today's brief is in (click to read it), and Stories closed/committed.
+- **Today's plan:** a checklist built from today's standup responsibilities, plus anything added from the queues or Up next. It's saved per developer in localStorage (`devDashboard.plan.<email>`), and unfinished entries carry over to the next day. A responsibility repeated in a later standup refreshes its entry instead of adding a second one.
+- **Linking entries to board items:**
+  - An @mention in the brief line, or an ADO number in its text, links exactly.
+  - Otherwise a clear title match links the entry. A weaker one shows "Looks like DEV-…", with CONFIRM or ✕.
+  - LINK (or Enter on the entry) opens a picker to choose or remove a link.
+  - A linked entry can be started, and ticking it marks the item done in its source.
+- **Linked items that leave the board:** if a linked item disappears, the entry ticks itself when the source says it's finished (ADO Closed, or the Notion page's Status or Mark Done). Otherwise it's flagged "Not on your board".
+- **Up next:** queue items not in the plan, ranked by the brief's aging items, standup age, how many sprints a Pulse item has been open, ADO priority, the sprint ending, and Solarwinds priority. Each shows its reasons. Possible duplicates (near-identical titles) are flagged.
+- **Blocked:** shown when anything is blocked, or while dragging, as a drop target.
+- **Coming up:** the next 21 days from Deadlines and Milestones, the sprint end, and dates read from today's team items ("Code Jam at HQ on Oct. 8"). A team-item date that repeats a calendar entry is left out.
+- **Team notes:** today's team items, replacing the old ticker.
+- **Leads:** someone who gets the Leadership Summary sees "Team today" first: each developer's update, plus their ADO stories in the Blocked state. Notion tasks blocked on the board live in each developer's browser, so they don't appear here.
+
+**Working on an item:**
+- Starting an item switches the centre to it. A bar shows "← MY DAY" and the next plan entry, and today's plan and Blocked move into a right-hand rail. Marking it done returns to My Day with the next entry highlighted.
 
 **Working Space:**
 - Shows the active item with its state, NOTION ↗ or ADO ↗ and TICKET ↗ links, and ✓ DONE.
@@ -154,16 +178,14 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - `RichText` renders that text, and plain Notion text, keeping line breaks and making `[label](url)` and bare URLs clickable in a new tab. It never renders HTML.
 - Card previews use `plainText`, which strips the URLs and collapses the text to one line.
 
-**Header and centre panels:**
-- **Header:** live sprint name and dates, the sprint day (`10/14`), Today and Blocked counts, the clock and date, and a TEMP developer switcher.
-- **Sprint panel:**
-  - Time: the day of the sprint, with a bar.
-  - Stories (when Stories are on): closed/committed stories and points for the developer, with a bar. The ADO query includes closed items for this; the board still hides Closed and Removed stories.
-  - Tasks and Pulse + tickets: open counts. notion-bridge returns only open items, so there is no done/total for them.
-- **Daily Brief:** the developer's responsibilities and aging items. Lines linked to a Task show `DEV-… ↗` and open that Task. Leads see the per-developer Leadership Summary. The panel says "TODAY'S NOT POSTED YET" when showing an older brief.
-- **Ticker:** Team Items plus deadlines starting or ending within 14 days. It scrolls at a constant 35 px/s, pauses on hover, and a click opens the reader.
-- **Sprint Calendar:** Deadlines and Milestones from today through the sprint end plus 42 days, grouped "This sprint" / "Upcoming", with a bar showing where each falls in the sprint.
-- **Reader overlay:** opened by clicking the brief or calendar panel, the ⤢ button, or the ticker. It has three tabs (Daily Brief, Team Items & Dates, Sprint Calendar) and shows content at 1.15× size. Esc or a click outside closes it.
+**Header:** the sprint name and dates, the sprint day (`10/14`), open plan entries, the Blocked count, the clock and date, and a TEMP developer switcher.
+
+**Reader overlay:** opened from My Day ("Today's brief is in", BRIEF ⤢, CALENDAR ⤢). It has three tabs and shows content at 1.15× size; Esc or a click outside closes it.
+- **Daily Brief:** the responsibilities and aging items, or a lead's Leadership Summary. Lines that @mention a Task show `DEV-… ↗` and open it.
+- **Team Items & Dates:** team items plus deadlines starting or ending within 14 days.
+- **Sprint Calendar:** Deadlines and Milestones through the sprint end plus 42 days, with bars showing where each falls in the sprint.
+
+Stories closed/committed comes from the ADO query, which includes closed items for this; the board still hides Closed and Removed stories.
 
 **Boot screen:**
 - Shows on first load and whenever the developer is switched.
@@ -178,7 +200,11 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
   - `BRIDGE_REFRESH_MS`, `CONTEXT_REFRESH_MS`
   - `STALE_STANDUP_DAYS` (6), `DEADLINE_TICKER_DAYS` (14), `CALENDAR_LOOKAHEAD_DAYS` (42)
   - `TEST_DEVELOPERS`
-- `src/App.tsx`: `TICKER_PX_PER_SEC` (35), `RELATION_FIELDS`.
+- `src/App.tsx`: `UNDO_MS` (6000, the undo window), `RELATION_FIELDS`.
+- `src/plan.ts`: `LINK_AT` (0.6), `SUGGEST_AT` (0.4), `LINK_MARGIN` (0.1) and `DUPLICATE_AT` (0.8) for title matching.
+- `src/ranking.ts`: `WEIGHTS` for each "Up next" signal, and `SPRINT_ENDING_DAYS` (3).
+- `src/schedule.ts`: `COMING_UP_DAYS` (21).
+- `src/MyDay.tsx`: `UP_NEXT_SHOWN` (6).
 - `src/BootScreen.tsx`: `GREETINGS` and the timing constants.
 
 **Styling (design tokens in `src/index.css`):**
@@ -206,11 +232,33 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
   - Sources aren't colour-coded; type tags are neutral chips, and MED and LOW priorities are neutral.
 - **Shared classes:** `.label`, `.ref`, `.chip`, `.btn-quiet`, `.link`, `.panel`, `.panel-header` and `.task-card`, in `@layer components`.
 - **Fonts:** monospace is for IDs, labels and metadata. Titles, body text and tab names use Inter.
-- **Inline styles:** inline `style` is only for data-driven values, such as progress widths, ticker speed, calendar bar positions and the boot fade.
-- **Layout:** the side columns and the brief strip scale with the window (`clamp()` in `App.tsx`).
-- **Motion:** the ticker, pulse dots and cursor blink stop when the OS asks for reduced motion.
+- **Inline styles:** inline `style` is only for data-driven values, such as calendar bar positions and the boot fade.
+- **Layout:** the side columns scale with the window (`clamp()` in `App.tsx`); My Day fills the rest, and the right rail appears only while an item is being worked on.
+- **Focus:** keyboard-focusable rows (`.row`, `.task-card`) show an accent outline; `.row-flash` briefly highlights the next plan entry.
+- **Motion:** the pulse dots, cursor blink and row highlight stop when the OS asks for reduced motion.
 
 ## 5. Verification performed
+**2026-10-02 (My Day), against ado-bridge in mock mode.** No Notion item was claimed or marked done.
+- **Build:** `npx tsc --noEmit` and `npm run build` are clean, with no console errors on a fresh load. No text is under 10px or below AA contrast.
+- **Plan from Philip's 10/02 brief:**
+  - 4 of 6 responsibilities linked to their tasks by title.
+  - The PR review stayed unlinked, and the product-ingestion line had no confident match.
+  - The aging task was flagged, and DEV-923660 / DEV-9EB23B were flagged as possible duplicates.
+  - The two Active stories joined the plan.
+- **Up next:** led by the aging late-fees task, then Pulse items 2+ sprints old, then P2 stories with "Sprint ends Tue".
+- **Coming up:** Code Jam (Oct 8), Dev Day (Oct 9) and Oct 13 events were read from team items; "BPM pen testing begins" wasn't duplicated.
+- **Keyboard:** `p`/`j` moved through the plan, `x` ticked and unticked an unlinked entry, and `Alt+↑/↓` reordered it.
+- **Linking:** Enter opened the link picker, filtering and Enter linked an entry, and REMOVE LINK unlinked it (the item isn't suggested again for that entry).
+- **Working on an item:** START opened it with the plan rail, and Esc toggled between it and My Day ("Working on … RESUME").
+- **Done and undo:** ✓ DONE then UNDO left ADO untouched after the window. `d` on an Up next story closed it after 6 seconds, and Stories went to 1/5.
+- **Adding and blocking:**
+  - Adding a story set it Active, and UNDO set it back to New and removed the plan entry.
+  - Adding a Notion task wrote nothing.
+  - `b` set a story Blocked, and UNBLOCK set it Active again.
+- **Lead view:** Steven saw Team today with 5 updates, and Taylor's blocked story under Taylor.
+- **Done elsewhere:** closing a planned story directly in ADO ticked and locked its entry on the next load.
+- **Layout:** no clipping or horizontal scroll at 1280×720, 1440×900 or 1920×1080.
+
 **2026-10-02 (sprint metrics, descriptions, legibility pass), against ado-bridge in mock mode:**
 - **Build:** `npx tsc --noEmit` and `npm run build` are clean, with no console errors.
 - **Legibility, measured on the live page at 1440×900:** visible text under 10px went from 105 nodes to 0, and text under 4.5:1 contrast from 44 nodes to 0.
@@ -260,7 +308,12 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **ADO Stories run on mock data:**
   - The Stories tab is off unless the dev server starts with `VITE_ADO_STORIES=true`.
   - While `ADO_MOCK=true`, ado-bridge serves a local seed. Moves and ✓ DONE change only its in-memory copy, which resets when it restarts.
-- **No done/total for Notion queues:** notion-bridge returns only open Sprint Developer Items and Pulse rows, so the Sprint panel shows open counts for them.
+- **No done/total for Notion queues:** notion-bridge returns only open Sprint Developer Items and Pulse rows, so only Stories shows closed/committed.
+- **Briefs don't link to items:** the 10/02 briefs have no @mentions of tasks, so plan entries link by title (4 of 6 that day), with CONFIRM or LINK for the rest. If the brief generator @mentioned the task on each responsibility, linking would be exact.
+- **Blocked Notion items stay private:** Notion has no Blocked status. Sprint Developer Items uses Backlog / In Progress / Done; Pulse uses Not started / Pending / Posted / In progress / Done. A blocked Notion task is therefore only visible in its developer's browser, and a lead sees ADO blockers only. A Blocked status in Notion, written by the board, would fix this.
+- **No meetings yet:** the team uses Outlook; showing meetings and free time in My Day waits for the calendar integration.
+- **Ranking weights are a first pass:** they're in `WEIGHTS` in `src/ranking.ts`; tune them once the team has used Up next for a while.
+- **Plan lives in one browser:** like lanes, the plan is per developer per browser.
 - **Solarwinds re-imports:** replacing rows via CSV re-import loses any relations set by hand.
 - **Brief matching:** briefs are matched by the Notion user's first name, so two developers with the same first name would collide.
 - **Release target:** Pulse release always goes to `Pending`, not back to the item's previous status.
