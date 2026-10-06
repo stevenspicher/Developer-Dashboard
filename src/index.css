@@ -275,31 +275,6 @@
     background: var(--panel-top);
   }
 
-  .panel-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    font-family: var(--font-mono);
-    font-size: var(--text-meta);
-    font-weight: 700;
-    letter-spacing: var(--tracking-label);
-    text-transform: uppercase;
-    color: var(--accent);
-    border-bottom: 1px solid var(--line);
-    background: var(--panel-head-bg);
-  }
-
-  .task-card {
-    border-color: var(--card-line);
-    cursor: grab;
-    transition: border-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
-    user-select: none;
-  }
-  .task-card:hover { border-color: var(--card-line-hover); }
-  .task-card:active { cursor: grabbing; opacity: 0.7; transform: scale(0.98); }
-
-  .drop-active,
   .drop-zone[data-drop='on'] {
     border-color: var(--drop-line) !important;
     background: var(--drop-wash) !important;
@@ -314,8 +289,7 @@
   /* Keyboard-navigable rows (plan, up next, queue cards). */
   .row { outline: none; }
   .row:hover { background: var(--row-hover); }
-  .row:focus-visible,
-  .task-card:focus-visible {
+  .row:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: -1px;
     background: var(--accent-wash);
@@ -368,5 +342,4 @@
   .pulse,
   .blink,
   .row-flash { animation: none; }
-  .task-card { transition: none; }
 }

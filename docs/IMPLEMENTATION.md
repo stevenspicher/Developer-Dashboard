@@ -126,10 +126,9 @@ New manifest fields:
 - `src/bridge.ts`: API client, the `QUEUES` adapters (Notion queues and ADO Stories), saved lanes, the ADO HTML-to-text conversion, date helpers, tunable constants.
 - `src/RichText.tsx`: renders description text with its line breaks and clickable links.
 - `src/BootScreen.tsx`: the terminal-style loading screen.
-- `src/App.tsx`: mounts the board and the current layout (`<BoardProvider><ClassicApp/></BoardProvider>`).
-- `src/board/useBoard.ts`: all the board's state and behaviour with no markup: queues, writes and undo, the plan, lanes, ticks, the standup, derived views and the global shortcuts. `board/BoardContext.tsx` provides it, `board/types.ts` holds the shared types (`DayActions`, `PlanView`, `Toast`…) and `board/constants.ts` the source tabs and timings.
-- `src/modes/scan/`: the Scan layout (`ScanMode.tsx`, the panes, the selection rules). `src/ui/` holds what the new layouts share: `Header`, `rows`, `LinkPicker`, `Reader`, `keymap` and the components described under Styling.
-- `src/classic/ClassicApp.tsx`: the current layout (header, queues panel, working space, overlays), a view over the board. `src/classic/MyDay.tsx`: the My Day view, plus the focus bar and plan rail shown while working on an item.
+- `src/App.tsx`: mounts the board, the saved look (`PrefsProvider`) and the chosen layout, Scan or Flow.
+- `src/board/useBoard.ts`: all the board's state and behaviour with no markup: queues, writes and undo, the plan, lanes, ticks, the standup, and derived views. `board/BoardContext.tsx` provides it, `board/types.ts` holds the shared types (`DayActions`, `PlanView`, `Toast`…) and `board/constants.ts` the source tabs and timings.
+- `src/modes/scan/` and `src/modes/flow/`: the two layouts (each a view over the board). `src/ui/` holds what they share: `Header`, `rows`, `LinkPicker`, `Reader`, `keymap` and the components described under Styling.
 - `src/plan.ts`: the day's plan: storage, carry-over, merging the standup, and linking entries to board items.
 - `src/ranking.ts`: the "Up next" ranking and its reasons.
 - `src/schedule.ts`: "Coming up" (including dates read from team items) and day arithmetic.
@@ -153,9 +152,9 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **One item in Working:** starting a new item moves the previous one back to Todo.
 - **Writes with undo:** a Pulse claim or release and an ADO state change happen immediately and show a toast with UNDO, which reverses the write. If the write fails, the card moves back and the queue panel shows a dismissible error.
 - **Mark done:** the card leaves at once, and the write waits 6 seconds so the toast's UNDO (or unticking the plan entry) can cancel it. A pending done is sent straight away if the page closes or the developer is switched.
-- **No drag needed:** cards, plan entries and Up next rows have buttons, and keyboard shortcuts when focused: `j`/`k` move, `Enter` open, `s` start, `t` add to the plan, `x` tick, `d` done, `b` block, `Alt+↑/↓` reorder the plan, `Delete` remove from the plan. `p`, `n` and `q` jump to the plan, Up next and the queues; `Esc` switches between the item being worked on and My Day.
+- **No drag needed:** cards, plan entries and Up next rows have buttons, and keyboard shortcuts when focused: `j`/`k` move, `Enter` open, `s` start, `t` add to the plan, `x` tick, `d` done, `b` block, `Alt+↑/↓` reorder the plan, `Delete` remove from the plan. `p`, `n`, `r` and `q` jump to the plan, Up next, Reviews and the queues (a list in Scan, a section or the drawer in Flow); `Esc` closes the top overlay.
 
-**My Day (the centre when nothing is being worked on):**
+**The day (Flow shows it as one column; Scan splits it across its lists):**
 - **Header:** the date, the sprint day and working days left, whether today's brief is in (click to read it), STANDUP DRAFT, and Stories closed/committed.
 - **Today's plan:** a checklist built from today's standup responsibilities, plus anything added from the queues or Up next. It's saved per developer in localStorage (`devDashboard.plan.<email>`), and unfinished entries carry over to the next day. A responsibility repeated in a later standup refreshes its entry instead of adding a second one.
 - **Linking entries to board items:**
@@ -173,7 +172,7 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **Leads:** someone who gets the Leadership Summary sees "Team today" first: each developer's update, plus their ADO stories in the Blocked state. Notion tasks blocked on the board live in each developer's browser, so they don't appear here.
 
 **Working on an item:**
-- Starting an item switches the centre to it. A bar shows "← MY DAY" and the next plan entry, and today's plan and Blocked move into a right-hand rail. Marking it done returns to My Day with the next entry highlighted.
+- Starting an item shows it in Flow's Working card, or in Scan's pane. Marking it done highlights the next plan entry.
 
 **Working Space and detail modal:** both show the same cockpit pane (`src/ui/cockpit/CockpitPane.tsx`), the working one with a green "Working" marker.
 - **Header:** type, ref, source, state, "Open in ADO/Notion ↗" and "Ticket ↗", priority, points, sprint and avatar.
@@ -212,7 +211,7 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 
 **Header:** the sprint name and dates, the sprint day (`10/14`), open plan entries, the Blocked count, the clock and date, and a TEMP developer switcher.
 
-**Reader overlay:** opened from My Day ("Today's brief is in", BRIEF ⤢, CALENDAR ⤢). It has three tabs and shows content at 1.15× size; Esc or a click outside closes it.
+**Reader overlay:** opened from the day header and sections ("Today's brief is in", BRIEF ⤢, CALENDAR ⤢). It has three tabs and shows content at 1.15× size; Esc or a click outside closes it.
 - **Daily Brief:** the responsibilities and aging items, or a lead's Leadership Summary. Lines that @mention a Task show `DEV-… ↗` and open it.
 - **Team Items & Dates:** team items plus deadlines starting or ending within 14 days.
 - **Sprint Calendar:** Deadlines and Milestones through the sprint end plus 42 days, with bars showing where each falls in the sprint.
@@ -236,7 +235,7 @@ Stories closed/committed comes from the ADO query, which includes closed items f
 - `src/plan.ts`: `LINK_AT` (0.6), `SUGGEST_AT` (0.4), `LINK_MARGIN` (0.1) and `DUPLICATE_AT` (0.8) for title matching.
 - `src/ranking.ts`: `WEIGHTS` for each "Up next" signal, and `SPRINT_ENDING_DAYS` (3).
 - `src/schedule.ts`: `COMING_UP_DAYS` (21).
-- `src/MyDay.tsx`: `UP_NEXT_SHOWN` (6).
+- `src/modes/flow/FlowMode.tsx`: `UP_NEXT_SHOWN` (6).
 - `src/BootScreen.tsx`: `GREETINGS` and the timing constants.
 
 **Styling (design tokens in `src/index.css`):**
@@ -266,11 +265,11 @@ Stories closed/committed comes from the ADO query, which includes closed items f
 - **Colour meanings:**
   - Each colour has one meaning: `accent` = interactive or selected, `ok` = done or active, `warn` = needs attention (HIGH, a stale standup, aging items), `danger` = critical, blocked or failed.
   - Sources aren't colour-coded; type tags are neutral chips, and MED and LOW priorities are neutral.
-- **Shared classes:** `.label`, `.ref`, `.chip`, `.btn-quiet`, `.link`, `.panel`, `.panel-header` and `.task-card`, in `@layer components`.
+- **Shared classes:** `.label`, `.ref`, `.chip`, `.btn-quiet`, `.link`, and `.panel`, in `@layer components`.
 - **Fonts:** monospace is for IDs, labels and metadata. Titles, body text and tab names use Inter.
 - **Inline styles:** inline `style` is only for data-driven values, such as calendar bar positions and the boot fade.
-- **Layout:** the side columns scale with the window (`clamp()` in `App.tsx`); My Day fills the rest, and the right rail appears only while an item is being worked on.
-- **Focus:** keyboard-focusable rows (`.row`, `.task-card`) show an accent outline; `.row-flash` briefly highlights the next plan entry.
+- **Layout:** Scan's list width scales with the window (`clamp()`); Flow's column is at most 720px.
+- **Focus:** keyboard-focusable rows (`.row`) show an accent outline; `.row-flash` briefly highlights the next plan entry.
 - **Motion:** the pulse dots, cursor blink and row highlight stop when the OS asks for reduced motion.
 
 ## 5. Verification performed

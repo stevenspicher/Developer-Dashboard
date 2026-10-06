@@ -11,7 +11,7 @@ beforeEach(() => { localStorage.clear(); document.documentElement.removeAttribut
 afterEach(() => { document.body.innerHTML = '' })
 
 const Layout = () => <output>{usePrefs().layout}</output>
-const app = (developer = 'a@x.com', override?: 'scan' | 'flow' | 'classic') => (
+const app = (developer = 'a@x.com', override?: 'scan' | 'flow') => (
   <PrefsProvider developer={developer} override={override}>
     <ModeSwitcher /><LookMenu /><Layout />
   </PrefsProvider>
@@ -45,9 +45,8 @@ describe('PrefsProvider, ModeSwitcher and LookMenu', () => {
   })
 
   it('lets the address choose a layout until the developer picks one', () => {
-    const ui = mount(app('a@x.com', 'classic'))
-    expect(ui.container.querySelector('output')!.textContent).toBe('classic')
-    expect(document.documentElement.dataset.theme).toBe('dark')
+    const ui = mount(app('a@x.com', 'scan'))
+    expect(ui.container.querySelector('output')!.textContent).toBe('scan')
     click(radio(ui.container, 'Flow'))
     expect(ui.container.querySelector('output')!.textContent).toBe('flow')
     ui.unmount()

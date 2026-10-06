@@ -16,7 +16,7 @@ ADO User Stories are on by default and need ado-bridge connected to Azure DevOps
 
 ## Layouts
 
-Scan (a list and a pane) and Flow (the day as one column with a queues drawer) are the two layouts. The header switches between them (Auto picks Scan from 1100px wide, Flow below) and its Look menu sets theme, density and the HUD ornaments, all saved per developer. `/?ui=scan`, `/?ui=flow` and `/?ui=classic` (the old layout, until it is removed) name a layout in the address.
+Scan (a list and a pane) and Flow (the day as one column with a queues drawer) are the two layouts. The header switches between them (Auto picks Scan from 1100px wide, Flow below) and its Look menu sets theme, density and the HUD ornaments, all saved per developer. `/?ui=scan` and `/?ui=flow` name a layout in the address until one is picked in the header.
 
 ## Tests
 

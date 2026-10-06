@@ -686,6 +686,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 
 ### Phase 7: cleanup
 
+**Status (2026-10-06): built.** Deleted `src/classic/` (`ClassicApp`, `MyDay`), the `?ui=classic` override and the `classic` layout value, the board's classic-only parts (the `view` and `focusing` state, `resume`, `backToMyDay`, `returnToPlan` and the global key handler, which Scan and Flow replace with their own), and the CSS only the old layout used (`.panel-header`, `.task-card`, `.drop-active`, `.hud-corner`). `/?ui=scan` and `/?ui=flow` stay as overrides until a layout is picked in the header, and `/?ui=tokens` and `/?ui=atoms` remain as developer pages (so `ThemeControls` stays). `docs/IMPLEMENTATION.md` §4 and the README are updated; `docs/FRONTEND_BRIEF.md` is left as the historical brief, and the dated 2026-10-02 test logs in IMPLEMENTATION still say My Day. The boot screen is kept, as decided (Q5). Checked: type check, 223 tests, build, contrast, and both layouts in the browser.
+
 - **Files:** delete `src/classic/`, unused parts of `src/MyDay.tsx`, `hud-corner`, CRT and boot styles if the boot screen is retired; update `docs/IMPLEMENTATION.md` §4 (layout, keyboard, styling) and the brief's §2; remove the `?ui=` switch.
 - **Verify:** `tsc`, build, full R list in both modes and both themes; check `git grep` finds no references to removed components.
 

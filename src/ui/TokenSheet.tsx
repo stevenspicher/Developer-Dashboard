@@ -68,15 +68,9 @@ export default function TokenSheet() {
           <span className="inline-flex items-center gap-1.5 text-note text-warn"><span className="size-2 rounded-full bg-warn" />HIGH</span>
           <span className="inline-flex items-center gap-1.5 text-note text-ok"><span className="size-2 rounded-full bg-ok" />Working</span>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <div className="panel">
-            <div className="panel-header">PANEL HEADER</div>
-            <div className="p-3 text-body">A panel with a header, on --surface.</div>
-          </div>
-          <div className="task-card panel p-3" tabIndex={0}>
-            <div className="mb-1 flex items-center gap-1.5"><span className="chip">TASK</span><span className="ref">DEV-4DA584</span></div>
-            <div className="text-body font-semibold text-ink">A task card (hover or focus it)</div>
-            <div className="text-note text-dim">Preview text in the secondary colour.</div>
+            <div className="p-3 text-body">A panel, on --surface.</div>
           </div>
           <div className="flex flex-col gap-2">
             <div className="row border-b border-line-soft px-2 py-2 text-body" tabIndex={0}>A keyboard row (hover or focus)</div>

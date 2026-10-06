@@ -9,7 +9,7 @@ import { useMediaQuery } from './useMediaQuery'
 // show or change it. Changing it saves it (per developer, in this browser) and
 // applies it to <html> straight away; switching developer loads theirs.
 
-export type ActiveLayout = 'scan' | 'flow' | 'classic'
+export type ActiveLayout = 'scan' | 'flow'
 
 interface PrefsValue {
   prefs: UiPrefs
@@ -20,7 +20,7 @@ interface PrefsValue {
 
 const PrefsContext = createContext<PrefsValue | null>(null)
 
-// `override` is a layout named in the address (/?ui=flow, /?ui=classic). It wins
+// `override` is a layout named in the address (/?ui=scan, /?ui=flow). It wins
 // until the developer picks a layout themselves.
 export function PrefsProvider({ developer, override, children }: { developer: string; override?: ActiveLayout | null; children: ReactNode }) {
   const [state, setState] = useState(() => ({ developer, prefs: loadPrefs(developer) }))
@@ -38,9 +38,7 @@ export function PrefsProvider({ developer, override, children }: { developer: st
     return () => list.removeEventListener('change', update)
   }, [])
 
-  // The classic layout has no light theme, so it stays dark.
-  const classic = overridden === 'classic'
-  useEffect(() => { applyPrefs(classic ? { ...prefs, theme: 'dark' } : prefs, systemDark) }, [prefs, systemDark, classic])
+  useEffect(() => { applyPrefs(prefs, systemDark) }, [prefs, systemDark])
 
   const setPrefs = useCallback((patch: Partial<UiPrefs>) => {
     const next = { ...prefs, ...patch }

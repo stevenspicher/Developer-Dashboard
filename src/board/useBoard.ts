@@ -12,7 +12,6 @@ import type { BriefLine, Deadline, QueueProgress, Sprint, StandupBrief, TeamBloc
 import type { BootStep, BootStepState } from '../BootScreen'
 import type { CockpitValue } from '../ui/cockpit/context'
 import { clearTicks, loadTicks, saveTicks, toggleTick } from '../cockpitLogic'
-import { focusFirstRow } from '../keys'
 import {
   addItem, agingLabel, findDuplicates, linkEntries, linkTo, loadPlan, matchLine, mergeBrief, plannedIds,
   removeAddedEntry, removeEntry, reorder, rollover, savePlan, shift, suggestLinks, updateEntry, updateItemEntries,
@@ -43,7 +42,6 @@ export function useBoard() {
   const [developer, setDeveloper] = useState(loadDeveloper)
   const [plan, setPlan] = useState(() => loadPlan(developer, localIsoDate()))
   const [ticks, setTicks] = useState(() => loadTicks(developer)) // ticked acceptance criteria, this browser only
-  const [view, setView] = useState<'myday' | 'focus'>('focus')
   const [highlight, setHighlight] = useState<string | null>(null)
   const [linkFor, setLinkFor] = useState<PlanEntry | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
@@ -91,7 +89,6 @@ export function useBoard() {
     setReviews(ADO_STORIES_ENABLED ? 'loading' : null)
     setPlan(loadPlan(email, today))
     setTicks(loadTicks(email))
-    setView('focus')
     setHighlight(null)
     setToast(null)
     setBridgeLoading(true)
@@ -257,7 +254,6 @@ export function useBoard() {
   }, [tasks, bridgeLoading])
 
   const workingTask = visibleTasks.find(t => t.status === 'working') ?? null
-  const focusing = !!workingTask && view === 'focus'
 
   // Move a card between lanes. Only one item can be in Working; the previous
   // one drops back to Todo. Sources that track lanes (Pulse claims, ADO state)
@@ -367,7 +363,6 @@ export function useBoard() {
   const startTask = (task: Task) => {
     const onUndo = forgetIfNew(task)
     setPlan(p => addItem(p, task))
-    setView('focus')
     moveTask(task.id, 'working', onUndo)
   }
 
@@ -433,22 +428,6 @@ export function useBoard() {
     'data-drop': dropTarget === zone ? ('on' as const) : undefined,
   })
 
-  // Global shortcuts; rows handle their own keys first.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (booting || e.metaKey || e.ctrlKey || e.altKey || document.querySelector('[data-overlay]')) return
-      if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]')) return
-      if (e.key === 'Escape' && workingTask) setView(v => (v === 'focus' ? 'myday' : 'focus'))
-      else if (e.key === 'p') focusFirstRow('plan')
-      else if (e.key === 'n') focusFirstRow('upnext')
-      else if (e.key === 'q') focusFirstRow('queue')
-      else return
-      e.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
-
   // ── Derived views ──
   const planned = useMemo(() => plannedIds(plan), [plan])
   const queueTasks = visibleTasks.filter(t => t.status === 'queue' && t.source === queueTab && !planned.has(t.id))
@@ -510,7 +489,6 @@ export function useBoard() {
     block: task => moveTask(task.id, 'blocked'),
     unblock: task => { setPlan(p => addItem(p, task)); moveTask(task.id, 'today') },
     done: scheduleDone,
-    resume: () => setView('focus'),
     openReader: tab => setReader(tab),
     dragItem: handleDragStart,
     dropProps,
@@ -569,8 +547,6 @@ export function useBoard() {
   const closeDetail = () => setModalTask(null)
   const startFromDetail = (task: Task) => { setModalTask(null); startTask(task) }
   const addFromDetail = (task: Task) => { setModalTask(null); addToPlan(task) }
-  const backToMyDay = () => setView('myday')
-  const returnToPlan = (task: Task) => { setView('myday'); moveTask(task.id, 'today') }
   const dismissError = () => setActionError(null)
   const linkEntry = (entry: PlanEntry, task: Task) => { actions.confirm(entry, task); setLinkFor(null) }
   const unlinkEntry = (entry: PlanEntry) => {
@@ -590,7 +566,7 @@ export function useBoard() {
     // state
     tasks, visibleTasks, tasksById, plan, ticks, developer, currentDeveloper, today, sprint, brief, briefData, deadlines,
     reviews, teamBlockers, progress, bridgeLoading, bridgeErrors, actionError, toast, booting,
-    view, focusing, workingTask, modalTask, linkFor, reader, queueTab, dragId, dropTarget,
+    workingTask, modalTask, linkFor, reader, queueTab, dragId, dropTarget,
     // derived
     planned, queueTasks, blockedTasks, openEntries, upNext, events, planView, nextUp, linkCandidates,
     unplannedCount, countOf, sprintHeader, sprintDay, sprintLength, sprintDaysLeft, tickerItems, calendarItems,
@@ -598,7 +574,7 @@ export function useBoard() {
     // actions
     actions, cockpit, doneHandler, startTask, addToPlan, moveTask, changeDeveloper, openMention,
     handleDragStart, handleDragOver, handleDragLeave, handleDrop,
-    setQueueTab, setModalTask, closeDetail, startFromDetail, addFromDetail, backToMyDay, returnToPlan,
+    setQueueTab, setModalTask, closeDetail, startFromDetail, addFromDetail,
     dismissError, linkEntry, unlinkEntry, closePicker, setReader, closeReader, undoToast, dismissToast, finishBoot,
   }
 }

@@ -12,7 +12,7 @@ export type ReaderTab = 'brief' | 'ticker' | 'calendar' | 'draft'
 // Pull requests waiting on the developer. Null when there's no ado-bridge to ask.
 export type Reviews = PullRequest[] | 'loading' | { error: string } | null
 
-// What My Day asks the board to do.
+// What the layouts ask the board to do.
 export interface DayActions {
   toggle: (entry: PlanEntry) => void
   start: (task: Task) => void
@@ -27,7 +27,6 @@ export interface DayActions {
   block: (task: Task) => void
   unblock: (task: Task) => void
   done: (task: Task) => void
-  resume: () => void
   openReader: (tab: ReaderTab) => void
   dragItem: (e: React.DragEvent, id: string) => void
   dropProps: (zone: DropZone) => React.HTMLAttributes<HTMLElement> & { 'data-drop'?: 'on' }
