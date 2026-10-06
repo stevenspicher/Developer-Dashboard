@@ -115,6 +115,9 @@ async function request<T>(path: string, init?: RequestInit, base = BRIDGE_BASE):
 const post = <T>(path: string, body: unknown) =>
   request<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true })
 
+const put = <T>(path: string, body: unknown, base = BRIDGE_BASE) =>
+  request<T>(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true }, base)
+
 const dev = (developer: string) => `developer=${encodeURIComponent(developer)}`
 
 export const fetchQueue = (slug: string, developer: string) =>
@@ -183,9 +186,46 @@ interface AdoWorkItem {
   url: string | null
 }
 
+// What ado-bridge's GET /workitems/{id}/links returns: the story's pull
+// requests, branches, commits and builds, plus the work items linked to it.
+export interface DevLinks {
+  pullRequests: { id: number; title?: string | null; status?: string | null; isDraft?: boolean; repo?: string | null; url: string }[]
+  branches: { name: string; repo?: string | null; url: string }[]
+  commits: { sha: string; repo?: string | null; url: string }[]
+  builds: { id: number; name?: string | null; definition?: string | null; status?: string | null; result?: string | null; url: string }[]
+  hyperlinks: { title: string; url: string }[]
+  workItems: { adoId: number; relation: 'parent' | 'child' | 'related'; title?: string | null; state?: string | null; workItemType?: string | null; url?: string | null }[]
+}
+
+interface AdoComment {
+  commentId: number
+  text: string
+}
+
+// A developer's note on a story is one ADO comment, found by this first line.
+// Saving edits that comment instead of adding a new one each time.
+const ADO_NOTE_MARKER = '[Dev Dashboard note]'
+
+const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+const noteToHtml = (text: string) =>
+  `<div>${ADO_NOTE_MARKER}</div><div>${escapeHtml(text).replace(/\n/g, '<br>')}</div>`
+
+function parseAdoNote(comments: AdoComment[]): { id: number; text: string } | null {
+  // The latest one wins if someone added a second.
+  for (const c of [...comments].reverse()) {
+    const text = htmlToText(c.text)
+    if (text.startsWith(ADO_NOTE_MARKER)) return { id: c.commentId, text: text.slice(ADO_NOTE_MARKER.length).trim() }
+  }
+  return null
+}
+
 const adoGet = <T>(path: string) => request<T>(path, undefined, ADO_BASE)
 const adoPut = <T>(path: string, body: unknown) =>
   request<T>(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true }, ADO_BASE)
+
+const adoPost = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true }, ADO_BASE)
 
 const setAdoState = (adoId: string, state: string) => adoPut(`/workitems/${adoId}/state`, { state })
 
@@ -361,6 +401,15 @@ function adoStoriesQueue(): QueueAdapter {
       if (task.externalState) await setAdoState(task.id, task.externalState)
     },
     done: task => setAdoState(task.id, ADO_DONE_STATE).then(() => undefined),
+    devLinks: task => adoGet<DevLinks>(`/workitems/${task.id}/links`),
+    notes: {
+      load: async task => parseAdoNote(await adoGet<AdoComment[]>(`/workitems/${task.id}/comments`))?.text ?? '',
+      save: async (task, text) => {
+        const existing = parseAdoNote(await adoGet<AdoComment[]>(`/workitems/${task.id}/comments`))
+        if (existing) await adoPut(`/workitems/${task.id}/comments/${existing.id}`, { comment: noteToHtml(text) })
+        else if (text) await adoPost(`/workitems/${task.id}/comments`, { comment: noteToHtml(text) })
+      },
+    },
     related: async task => {
       if (!task.parentId) return [{ relation: 'parent', id: null, empty: true }]
       try {
@@ -497,6 +546,13 @@ export interface QueueAdapter {
   revert?: (task: Task, from: Status, to: Status, developer: string) => Promise<void>
   done?: (task: Task, developer: string) => Promise<void>
   related?: (task: Task) => Promise<RelatedEntity[]>
+  // Branches, PRs and builds linked to the item, and the items linked to it.
+  devLinks?: (task: Task) => Promise<DevLinks>
+  // The developer's note on the item, written back to the source.
+  notes?: {
+    load: (task: Task) => Promise<string>
+    save: (task: Task, text: string, developer: string) => Promise<void>
+  }
 }
 
 export interface MoveResult {
@@ -541,6 +597,11 @@ function notionQueue({ source, slug, claimable, doneable, toTask }: {
       : undefined,
     done: doneable ? (task, developer) => markItemDone(task.id, slug, developer).then(() => undefined) : undefined,
     related: task => fetchRelated(task.id, slug),
+    // The note lives on the item's Notion page, in a "Dashboard notes" section.
+    notes: {
+      load: task => request<{ notes: string }>(`/items/${task.id}/notes?queue=${encodeURIComponent(slug)}`).then(b => b.notes),
+      save: async (task, text, developer) => { await put(`/items/${task.id}/notes`, { developer, queue: slug, notes: text }) },
+    },
   }
 }
 

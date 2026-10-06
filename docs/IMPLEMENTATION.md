@@ -94,6 +94,8 @@ New manifest fields:
 | `GET /queues?developer=` | All queues at once. |
 | `GET /standup/today?developer=` | `{date, isToday, mode: brief\|leadership\|none, teamItems, responsibilities, aging, summaries}`. Each line is `{text, mentions: [pageId]}`. It uses today's standup, or the latest earlier one with briefs. It returns the developer's Morning Brief matched by first name, otherwise the Leadership Summary. Cached 5 min (page tree 10 min). |
 | `GET /items/:id/related?queue=` | Item plus its related entities (properties, content, sub_pages). A related entity that has no link returns `{empty:true}`. |
+| `GET /items/:id/notes?queue=` | `{notes}`: the developer's note on the item, read from a "Dashboard notes" section at the end of the item's page (`''` when there is none). 400 if the page isn't a row of that queue. |
+| `PUT /items/:id/notes` | Body `{developer, queue, notes}` (max 10,000 characters). Edits that section in place, or adds the heading and paragraph on first save, and never touches the rest of the page or its properties. Allowed on `readOnly` queues, since that flag guards claims and done. |
 | `POST /items/:id/claim` | Body `{developer, queue}`. Writes the assignee and claimedState. 409 if the item belongs to someone else or isn't claimable. |
 | `POST /items/:id/release` | Only the current assignee can release. Clears the assignee and writes releaseState. |
 | `POST /items/:id/done` | Writes the queue's `done` map. The assignee or anyone may do this when the item is unassigned. |
@@ -111,6 +113,7 @@ New manifest fields:
 - `src/services/standupService.js`: finding and parsing standup pages and briefs.
 - `src/services/claimService.js`: claim, release and done.
 - `src/services/queueService.js`: queue filtering and the `claimed` list.
+- `src/services/noteService.js`: reading and writing the "Dashboard notes" section; `npm test` runs its tests (`test/`).
 - `src/services/identity.js`: resolves a developer to a Notion user; now also returns the user's name.
 - `src/notionClient.js`: gained `listBlockChildren`.
 - Routes: `src/routes/{sprint,standup,items,queues}.js`.
@@ -172,6 +175,12 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - Shows the active item with its state, NOTION ↗ or ADO ↗ and TICKET ↗ links, and ✓ DONE.
 - Its Project Context column lists the linked Initiative, Issue and Analyst Issue as cards (Notion items), or the parent work item (ADO stories).
 - Clicking a card opens a full view: every property with a value, full Description or Notes, full page content, and sub-page links.
+
+**Task cockpit** (`src/Cockpit.tsx`, logic in `src/cockpitLogic.ts`): the parts below appear in the detail modal and in the Working Space.
+- **Acceptance criteria checklist:** each criterion can be ticked, with a count (3/5) in the heading and an `AC 3/5` chip on queue cards. Ticks are stored in this browser per developer (`devDashboard.criteria.<email>`, keyed by criterion text) and nothing is written to ADO. They are cleared when the item is marked done in the dashboard, or when ADO reports it Closed.
+- **Dev links** (stories): pull requests (OPEN, DRAFT, MERGED or ABANDONED), branches, builds (PASSED, FAILED, PARTIAL or RUNNING), commits and hyperlinks, from ado-bridge `GET /workitems/{id}/links`. Against an ado-bridge without that endpoint the panel says it needs updating.
+- **Linked items:** ADO child and related work items (the parent stays under Project Context), plus loaded items that name this one by ref (`US-12345`, `#12345`, `BLUEADS-222`, `SW-4021`) or are named by it. Matching is on ref text only. Items on the board open in the detail view; others link out to ADO.
+- **Notes:** one note per item, saved with SAVE NOTE (Ctrl or ⌘ + Enter). On a story it is a single ADO comment starting with `[Dev Dashboard note]`, edited in place on later saves. On a Notion item it is the "Dashboard notes" section of the item's page. Unsaved text is kept while you switch tasks.
 
 **Descriptions:**
 - `htmlToText` in `bridge.ts` turns ADO HTML into text that keeps line breaks, blank lines between paragraphs, `•` and `1.` list markers (indented when nested), and links as `[label](url)`. Bold, italics and colours are dropped.
@@ -313,6 +322,8 @@ Stories closed/committed comes from the ADO query, which includes closed items f
 - **Blocked Notion items stay private:** Notion has no Blocked status. Sprint Developer Items uses Backlog / In Progress / Done; Pulse uses Not started / Pending / Posted / In progress / Done. A blocked Notion task is therefore only visible in its developer's browser, and a lead sees ADO blockers only. A Blocked status in Notion, written by the board, would fix this.
 - **No meetings yet:** the team uses Outlook; showing meetings and free time in My Day waits for the calendar integration.
 - **Ranking weights are a first pass:** they're in `WEIGHTS` in `src/ranking.ts`; tune them once the team has used Up next for a while.
+- **Notes are one per item:** a story's note is the latest ADO comment that starts with `[Dev Dashboard note]`. Notion notes need the integration to have update-content access to that database.
+- **Dev links need an ado-bridge that has `/workitems/{id}/links`:** the host's ado-bridge must be updated before stories show dev links, notes history or related work items.
 - **Plan lives in one browser:** like lanes, the plan is per developer per browser.
 - **Solarwinds re-imports:** replacing rows via CSV re-import loses any relations set by hand.
 - **Brief matching:** briefs are matched by the Notion user's first name, so two developers with the same first name would collide.

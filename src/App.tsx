@@ -21,6 +21,9 @@ import {
 import type { PlanEntry } from './plan'
 import { rankUpNext, reasonsFor } from './ranking'
 import type { RankContext } from './ranking'
+import { AcceptanceProgress, Checklist, CockpitContext, DevLinksPanel, LinkedItemsPanel, NotesPanel } from './Cockpit'
+import type { CockpitValue } from './Cockpit'
+import { clearTicks, loadTicks, saveTicks, toggleTick } from './cockpitLogic'
 import { LinkedText, RichText } from './RichText'
 import { comingUp, workingDaysAfter } from './schedule'
 
@@ -146,6 +149,7 @@ function TaskCard({ task, onDragStart, compact = false, onClick, onDone, onAdd, 
           <div className="mt-1 flex items-center gap-1.5">
             <Avatar initials={task.assignee} />
             {task.externalState && <span className="chip">{task.externalState}</span>}
+            <AcceptanceProgress task={task} />
             <div className="ml-auto flex items-center gap-2 font-mono text-meta text-muted">
               {task.standupAgeDays !== undefined && (
                 <span className={task.standupAgeDays > STALE_STANDUP_DAYS ? 'text-warn' : ''}>STANDUP {task.standupAgeDays}d</span>
@@ -221,11 +225,10 @@ function DetailModal({ task, planned, onClose, onStart, onAdd, onDone }: {
           </div>
         )}
 
-        {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
-          <Section label="ACCEPTANCE CRITERIA">
-            <AcceptanceCriteria items={task.acceptanceCriteria} />
-          </Section>
-        )}
+        <Checklist task={task} />
+        <DevLinksPanel task={task} />
+        <LinkedItemsPanel task={task} />
+        <NotesPanel task={task} />
 
         <Tags tags={task.tags} />
       </div>
@@ -257,19 +260,6 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       <div className="label mb-2 border-b border-line-soft pb-1.5">{label}</div>
       {children}
     </div>
-  )
-}
-
-function AcceptanceCriteria({ items }: { items: string[] }) {
-  return (
-    <>
-      {items.map((ac, i) => (
-        <div key={i} className="flex items-start gap-2 border-b border-line-soft py-1.5 last:border-b-0">
-          <span className="shrink-0 text-ok">◇</span>
-          <span className="text-body text-fg"><LinkedText text={ac} /></span>
-        </div>
-      ))}
-    </>
   )
 }
 
@@ -523,18 +513,19 @@ function WorkingSpace({ task, related, onClear, onDone, onDragStart }: {
             <Tags tags={task.tags} />
           </div>
 
-          {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
-            <Section label="ACCEPTANCE CRITERIA">
-              <AcceptanceCriteria items={task.acceptanceCriteria} />
-            </Section>
-          )}
+          <Checklist task={task} />
+          <NotesPanel task={task} />
         </div>
 
-        <div className="flex w-[280px] shrink-0 flex-col gap-2.5 overflow-y-auto px-3 py-3.5">
-          <div className="label border-b border-line-soft pb-1.5">PROJECT CONTEXT</div>
-          {task.queue
-            ? <RelatedPanel related={related} />
-            : <span className="text-note text-muted">No linked initiative, issue, or parent</span>}
+        <div className="flex w-[300px] shrink-0 flex-col gap-4 overflow-y-auto px-3 py-3.5">
+          <DevLinksPanel task={task} />
+          <div className="flex flex-col gap-2.5">
+            <div className="label border-b border-line-soft pb-1.5">PROJECT CONTEXT</div>
+            {task.queue
+              ? <RelatedPanel related={related} />
+              : <span className="text-note text-muted">No linked initiative, issue, or parent</span>}
+          </div>
+          <LinkedItemsPanel task={task} />
         </div>
       </div>
     </div>
@@ -569,6 +560,7 @@ export default function App() {
   const [sprint, setSprint] = useState<Sprint | null>(null)
   const [developer, setDeveloper] = useState(loadDeveloper)
   const [plan, setPlan] = useState(() => loadPlan(developer, localIsoDate()))
+  const [ticks, setTicks] = useState(() => loadTicks(developer)) // ticked acceptance criteria, this browser only
   const [view, setView] = useState<'myday' | 'focus'>('focus')
   const [highlight, setHighlight] = useState<string | null>(null)
   const [linkFor, setLinkFor] = useState<PlanEntry | null>(null)
@@ -615,6 +607,7 @@ export default function App() {
     setDoneIds(new Set())
     setTeamBlockers([])
     setPlan(loadPlan(email, today))
+    setTicks(loadTicks(email))
     setView('focus')
     setHighlight(null)
     setToast(null)
@@ -716,9 +709,19 @@ export default function App() {
   // ── The day's plan ──
   useEffect(() => { setPlan(p => rollover(p, today)) }, [today])
   useEffect(() => { savePlan(developer, plan) }, [developer, plan])
+  useEffect(() => { saveTicks(developer, ticks) }, [developer, ticks])
+  // Ticks only matter while the item is open: clear them once its source reports it closed.
+  useEffect(() => { setTicks(t => clearTicks(t, doneIds)) }, [doneIds])
   useEffect(() => { if (briefData) setPlan(p => mergeBrief(p, briefData)) }, [briefData])
 
   const visibleTasks = useMemo(() => tasks.filter(t => !hidden.has(t.id)), [tasks, hidden])
+  const cockpit = useMemo<CockpitValue>(() => ({
+    tasks: visibleTasks,
+    ticks,
+    developer,
+    toggleTick: (task, criterion) => setTicks(t => toggleTick(t, task.id, criterion)),
+    openTask: setModalTask,
+  }), [visibleTasks, ticks, developer])
   const tasksById = useMemo(() => new Map(visibleTasks.map(t => [t.id, t])), [visibleTasks])
 
   // Link entries to board items, and put anything pulled into Todo or Working
@@ -845,6 +848,7 @@ export default function App() {
         await done(task, who)
         setTasks(prev => prev.filter(t => t.id !== task.id))
         updateLanes(who, { [task.id]: null })
+        setTicks(t => clearTicks(t, [task.id]))
         setPlan(p => updateItemEntries(p, task.id, { done: true, doneAt: new Date().toISOString() }))
         // Count it as done straight away; the next refresh confirms it.
         setProgress(prev => {
@@ -1090,6 +1094,7 @@ export default function App() {
     : []
 
   return (
+    <CockpitContext.Provider value={cockpit}>
     <div className="flex h-screen flex-col overflow-hidden bg-bg font-sans">
 
       {/* ── Header ── */}
@@ -1299,6 +1304,7 @@ export default function App() {
         />
       )}
     </div>
+    </CockpitContext.Provider>
   )
 }
 
