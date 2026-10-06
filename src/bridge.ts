@@ -434,6 +434,22 @@ function adoStoriesQueue(): QueueAdapter {
   }
 }
 
+// An active pull request the developer is a reviewer on, from ado-bridge.
+export interface PullRequest {
+  pullRequestId: number
+  title: string
+  repo?: string | null
+  author?: string | null
+  createdDate?: string | null
+  isRequired: boolean
+  url: string
+}
+
+// Active pull requests waiting on this developer's review (no vote yet),
+// oldest first. Drafts and ones they've declined are left out by the bridge.
+export const fetchReviews = (developer: string) =>
+  adoGet<PullRequest[]>(`/pullrequests?reviewer=${encodeURIComponent(developer)}`)
+
 export interface TeamBlocker {
   assignee: string
   ref: string

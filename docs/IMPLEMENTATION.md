@@ -154,7 +154,7 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **No drag needed:** cards, plan entries and Up next rows have buttons, and keyboard shortcuts when focused: `j`/`k` move, `Enter` open, `s` start, `t` add to the plan, `x` tick, `d` done, `b` block, `Alt+↑/↓` reorder the plan, `Delete` remove from the plan. `p`, `n` and `q` jump to the plan, Up next and the queues; `Esc` switches between the item being worked on and My Day.
 
 **My Day (the centre when nothing is being worked on):**
-- **Header:** the date, the sprint day and working days left, whether today's brief is in (click to read it), and Stories closed/committed.
+- **Header:** the date, the sprint day and working days left, whether today's brief is in (click to read it), STANDUP DRAFT, and Stories closed/committed.
 - **Today's plan:** a checklist built from today's standup responsibilities, plus anything added from the queues or Up next. It's saved per developer in localStorage (`devDashboard.plan.<email>`), and unfinished entries carry over to the next day. A responsibility repeated in a later standup refreshes its entry instead of adding a second one.
 - **Linking entries to board items:**
   - An @mention in the brief line, or an ADO number in its text, links exactly.
@@ -163,6 +163,8 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
   - A linked entry can be started, and ticking it marks the item done in its source.
 - **Linked items that leave the board:** if a linked item disappears, the entry ticks itself when the source says it's finished (ADO Closed, or the Notion page's Status or Mark Done). Otherwise it's flagged "Not on your board".
 - **Up next:** queue items not in the plan, ranked by the brief's aging items, standup age, how many sprints a Pulse item has been open, ADO priority, the sprint ending, and Solarwinds priority. Each shows its reasons. Possible duplicates (near-identical titles) are flagged.
+- **Reviews waiting:** active pull requests where you are a reviewer who hasn't voted, oldest first, from ado-bridge `GET /pullrequests?reviewer=<email>`. Each shows the repo, author and how long it has waited (flagged after 2 days), REQUIRED when you're a required reviewer, and opens the PR in Azure DevOps. Drafts and PRs you've declined or voted on are left out. It refreshes every 5 minutes and is hidden when stories are switched off (`VITE_ADO_STORIES=false`).
+- **Standup draft:** the header's STANDUP DRAFT opens the reader on an editable update with COPY and RESET (`src/standup.ts`, `src/StandupDraft.tsx`). It lists **Done** (the last day that had anything finished, plus today's), **Today** (open plan entries with `REF` and criteria progress such as "2/3 criteria done", then each review waiting) and **Blocked**. It follows the board until you edit it; RESET rebuilds it. Finished entries are kept for a week in the plan's `doneLog` when a new day rolls the plan over.
 - **Blocked:** shown when anything is blocked, or while dragging, as a drop target.
 - **Coming up:** the next 21 days from Deadlines and Milestones, the sprint end, and dates read from today's team items ("Code Jam at HQ on Oct. 8"). A team-item date that repeats a calendar entry is left out.
 - **Team notes:** today's team items, replacing the old ticker.
@@ -324,6 +326,8 @@ Stories closed/committed comes from the ADO query, which includes closed items f
 - **Ranking weights are a first pass:** they're in `WEIGHTS` in `src/ranking.ts`; tune them once the team has used Up next for a while.
 - **Notes are one per item:** a story's note is the latest ADO comment that starts with `[Dev Dashboard note]`. Notion notes need the integration to have update-content access to that database.
 - **Dev links need an ado-bridge that has `/workitems/{id}/links`:** the host's ado-bridge must be updated before stories show dev links, notes history or related work items.
+- **Reviews need ado-bridge `/pullrequests`:** the host's ado-bridge must be updated, and the PR list covers only individual reviewers, not reviews requested through a team group. The dashboard's developer email must match the reviewer's Azure DevOps email.
+- **Standup draft is a starting point:** plan lines are the standup's wording, so long lines need trimming by hand. Done history exists only from the day the done log was introduced.
 - **Plan lives in one browser:** like lanes, the plan is per developer per browser.
 - **Solarwinds re-imports:** replacing rows via CSV re-import loses any relations set by hand.
 - **Brief matching:** briefs are matched by the Notion user's first name, so two developers with the same first name would collide.

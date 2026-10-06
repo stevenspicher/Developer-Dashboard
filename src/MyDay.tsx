@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import type { Task } from './types'
-import type { BriefLine, QueueProgress, Sprint, StandupBrief, TeamBlocker } from './bridge'
+import type { BriefLine, PullRequest, QueueProgress, Sprint, StandupBrief, TeamBlocker } from './bridge'
 import { daysBetween } from './bridge'
 import { rowKeys } from './keys'
 import type { Plan, PlanEntry } from './plan'
@@ -16,6 +16,10 @@ import { dayLabel, longDate, monthDay, weekdayShort, workingDaysAfter } from './
 // items, coming dates and the team's notes.
 
 export type DropZone = 'today' | 'working' | 'blocked' | 'queue'
+export type ReaderTab = 'brief' | 'ticker' | 'calendar' | 'draft'
+
+// Pull requests waiting on the developer. Null when there's no ado-bridge to ask.
+export type Reviews = PullRequest[] | 'loading' | { error: string } | null
 
 // What My Day asks the board to do.
 export interface DayActions {
@@ -33,7 +37,7 @@ export interface DayActions {
   unblock: (task: Task) => void
   done: (task: Task) => void
   resume: () => void
-  openReader: (tab: 'brief' | 'ticker' | 'calendar') => void
+  openReader: (tab: ReaderTab) => void
   dragItem: (e: React.DragEvent, id: string) => void
   dropProps: (zone: DropZone) => React.HTMLAttributes<HTMLElement> & { 'data-drop'?: 'on' }
   doneTarget: (task: Task) => string | null // where ✓ writes, or null when the source is read-only
@@ -51,6 +55,8 @@ export interface PlanView {
 }
 
 const UP_NEXT_SHOWN = 6
+// A review waiting this many days is flagged.
+const STALE_REVIEW_DAYS = 2
 const ENTRY_DRAG = 'application/x-plan-entry'
 
 const stop = (fn: () => void) => (e: React.SyntheticEvent) => {
@@ -58,12 +64,13 @@ const stop = (fn: () => void) => (e: React.SyntheticEvent) => {
   fn()
 }
 
-export function MyDay({ today, sprint, brief, planView, upNext, events, teamItems, blocked, working, storyProgress, teamBlockers, dragging, actions }: {
+export function MyDay({ today, sprint, brief, planView, upNext, reviews, events, teamItems, blocked, working, storyProgress, teamBlockers, dragging, actions }: {
   today: string
   sprint: Sprint | null
   brief: StandupBrief | { error: string } | null
   planView: PlanView
   upNext: Suggestion[]
+  reviews: Reviews
   events: DayEvent[]
   teamItems: BriefLine[]
   blocked: Task[]
@@ -141,6 +148,17 @@ export function MyDay({ today, sprint, brief, planView, upNext, events, teamItem
             {upNext.length === 0 && <div className="py-2 text-note text-muted">Nothing waiting outside your plan.</div>}
           </section>
 
+          {reviews !== null && (
+            <section className="mt-5">
+              <SectionHead
+                label="REVIEWS WAITING"
+                count={Array.isArray(reviews) && reviews.length ? String(reviews.length) : undefined}
+                tone={Array.isArray(reviews) && reviews.some(pr => reviewAge(pr, today) >= STALE_REVIEW_DAYS) ? 'text-warn' : 'text-accent'}
+              />
+              <ReviewList reviews={reviews} today={today} />
+            </section>
+          )}
+
           {(blocked.length > 0 || dragging) && (
             <section {...actions.dropProps('blocked')} className="drop-zone drop-zone-blocked mt-5 rounded-xs">
               <SectionHead label="BLOCKED" count={String(blocked.length)} tone="text-danger" />
@@ -178,6 +196,49 @@ export function MyDay({ today, sprint, brief, planView, upNext, events, teamItem
 
       <KeyHints />
     </div>
+  )
+}
+
+const reviewAge = (pr: PullRequest, today: string) => (pr.createdDate ? daysBetween(pr.createdDate.slice(0, 10), today) : 0)
+
+function ReviewList({ reviews, today }: { reviews: Reviews; today: string }) {
+  if (reviews === 'loading') return <div className="py-2 font-mono text-meta text-muted">LOADING…</div>
+  if (reviews && !Array.isArray(reviews)) {
+    return (
+      <div className="py-2 font-mono text-meta text-danger-fg">
+        {reviews.error === 'Not Found' ? 'Reviews need an updated ado-bridge' : `Reviews unavailable · ${reviews.error}`}
+      </div>
+    )
+  }
+  if (!reviews || reviews.length === 0) return <div className="py-2 text-note text-muted">No reviews waiting on you.</div>
+  return (
+    <>
+      {reviews.map(pr => {
+        const days = reviewAge(pr, today)
+        return (
+          <a
+            key={pr.pullRequestId}
+            href={pr.url}
+            target="_blank"
+            rel="noreferrer"
+            title="Open the pull request in Azure DevOps"
+            className="group flex items-start gap-2 border-b border-line-soft py-1.5 last:border-b-0"
+          >
+            <span className="mt-0.5 shrink-0 font-mono text-meta text-muted">#{pr.pullRequestId}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-note text-fg group-hover:text-ink">{pr.title}</span>
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-meta text-muted">
+                {pr.repo && <span>{pr.repo}</span>}
+                {pr.author && <span>by {pr.author}</span>}
+                <span className={days >= STALE_REVIEW_DAYS ? 'text-warn' : ''}>{days <= 0 ? 'opened today' : `${days}d waiting`}</span>
+                {pr.isRequired && <span className="chip">REQUIRED</span>}
+              </span>
+            </span>
+            <span className="shrink-0 text-accent">↗</span>
+          </a>
+        )
+      })}
+    </>
   )
 }
 
@@ -222,6 +283,9 @@ function DayHeader({ today, sprint, brief, storyProgress, onReader }: {
       </div>
       <div className="ml-auto flex flex-wrap items-center gap-2">
         {briefChip}
+        <button className="chip hover:text-ink" onClick={() => onReader('draft')} title="A standup update built from your day, ready to copy">
+          STANDUP DRAFT
+        </button>
         {storyProgress && storyProgress.total > 0 && (
           <span className="chip" title="Stories closed / committed this sprint · story points closed / committed">
             Stories {storyProgress.done}/{storyProgress.total}

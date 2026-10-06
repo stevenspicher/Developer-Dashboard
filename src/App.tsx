@@ -5,7 +5,7 @@ import {
   BRIDGE_REFRESH_MS, CALENDAR_LOOKAHEAD_DAYS, CONTEXT_REFRESH_MS, DEADLINE_TICKER_DAYS,
   ADO_STORIES_ENABLED, DEVELOPER_STORAGE_KEY, STALE_STANDUP_DAYS, TEST_DEVELOPERS,
   QUEUES, addDays, daysBetween, deadlineTickerText, fetchCurrentSprint, fetchDeadlines, fetchPageDone,
-  fetchStandup, fetchTeamBlockers, formatSprintRange, loadDeveloper, loadLanes, localIsoDate, plainText, queueFor,
+  fetchReviews, fetchStandup, fetchTeamBlockers, formatSprintRange, loadDeveloper, loadLanes, localIsoDate, plainText, queueFor,
   shortDate, stripLinks, updateLanes,
 } from './bridge'
 import type { BriefLine, Deadline, QueueProgress, RelatedEntity, Sprint, StandupBrief, TeamBlocker } from './bridge'
@@ -13,7 +13,7 @@ import BootScreen from './BootScreen'
 import type { BootStep, BootStepState } from './BootScreen'
 import { focusFirstRow, rowKeys } from './keys'
 import { FocusBar, MyDay, PlanRail } from './MyDay'
-import type { DayActions, DropZone, PlanView } from './MyDay'
+import type { DayActions, DropZone, PlanView, ReaderTab, Reviews } from './MyDay'
 import {
   addItem, agingLabel, findDuplicates, linkEntries, linkTo, loadPlan, matchLine, mergeBrief, plannedIds, rankByTitle,
   removeAddedEntry, removeEntry, reorder, rollover, savePlan, shift, suggestLinks, updateEntry, updateItemEntries,
@@ -25,7 +25,9 @@ import { AcceptanceProgress, Checklist, CockpitContext, DevLinksPanel, LinkedIte
 import type { CockpitValue } from './Cockpit'
 import { clearTicks, loadTicks, saveTicks, toggleTick } from './cockpitLogic'
 import { LinkedText, RichText } from './RichText'
-import { comingUp, workingDaysAfter } from './schedule'
+import { comingUp, longDate as formatLongDate, workingDaysAfter } from './schedule'
+import { buildStandupDraft } from './standup'
+import { StandupDraft } from './StandupDraft'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -567,6 +569,7 @@ export default function App() {
   const [toast, setToast] = useState<Toast | null>(null)
   const [hidden, setHidden] = useState<Set<string>>(new Set()) // marked done, still in the undo window
   const [teamBlockers, setTeamBlockers] = useState<TeamBlocker[]>([])
+  const [reviews, setReviews] = useState<Reviews>(ADO_STORIES_ENABLED ? 'loading' : null) // PRs waiting on the developer
   const [brief, setBrief] = useState<StandupBrief | { error: string } | null>(null)
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [related, setRelated] = useState<Record<string, RelatedEntity[] | 'loading' | { error: string }>>({})
@@ -606,6 +609,7 @@ export default function App() {
     setProgress({})
     setDoneIds(new Set())
     setTeamBlockers([])
+    setReviews(ADO_STORIES_ENABLED ? 'loading' : null)
     setPlan(loadPlan(email, today))
     setTicks(loadTicks(email))
     setView('focus')
@@ -705,6 +709,18 @@ export default function App() {
       .catch(() => { if (!cancelled) setTeamBlockers([]) })
     return () => { cancelled = true }
   }, [lead, sprint?.number, developer])
+
+  // Pull requests waiting on this developer's review.
+  useEffect(() => {
+    if (!ADO_STORIES_ENABLED) return
+    let cancelled = false
+    const load = () => fetchReviews(developer)
+      .then(r => { if (!cancelled) setReviews(r) })
+      .catch(e => { if (!cancelled) setReviews({ error: errorText(e) }) })
+    load()
+    const t = setInterval(load, CONTEXT_REFRESH_MS)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [developer])
 
   // ── The day's plan ──
   useEffect(() => { setPlan(p => rollover(p, today)) }, [today])
@@ -1078,6 +1094,20 @@ export default function App() {
     }
   }
 
+  const draftView = (
+    <StandupDraft
+      draft={buildStandupDraft({
+        today,
+        plan,
+        tasksById,
+        blocked: blockedTasks,
+        reviews: Array.isArray(reviews) ? reviews : [],
+        ticks,
+        longDate: formatLongDate(today),
+      })}
+    />
+  )
+
   const briefView = <BriefPanel brief={brief} tasks={visibleTasks} onOpen={openMention} today={today} />
   const calendarView = (
     <div className="flex-1 overflow-y-auto px-3 py-2">
@@ -1228,6 +1258,7 @@ export default function App() {
             brief={brief}
             planView={planView}
             upNext={upNext}
+            reviews={reviews}
             events={events}
             teamItems={briefData?.teamItems ?? []}
             blocked={blockedTasks}
@@ -1276,7 +1307,7 @@ export default function App() {
           tab={reader}
           onTab={setReader}
           onClose={() => setReader(null)}
-          views={{ brief: briefView, ticker: tickerView, calendar: calendarView }}
+          views={{ brief: briefView, ticker: tickerView, calendar: calendarView, draft: draftView }}
         />
       )}
 
@@ -1382,11 +1413,11 @@ function BriefPanel({ brief, tasks, onOpen, today }: {
 
 // ─── Reader (expanded brief / team items / calendar) ──────────────────────────
 
-type ReaderTab = 'brief' | 'ticker' | 'calendar'
 const READER_TABS: { id: ReaderTab; label: string }[] = [
   { id: 'brief', label: '◉ DAILY BRIEF' },
   { id: 'ticker', label: '◆ TEAM ITEMS & DATES' },
   { id: 'calendar', label: '◈ SPRINT CALENDAR' },
+  { id: 'draft', label: '✎ STANDUP DRAFT' },
 ]
 
 function TickerList({ items }: { items: { src: string; text: string }[] }) {

@@ -1,4 +1,5 @@
 import type { QueueSource, Task } from './types'
+import { daysBetween } from './bridge'
 import type { StandupBrief } from './bridge'
 
 // ─── The day's plan ───────────────────────────────────────────────────────────
@@ -24,11 +25,23 @@ export interface PlanEntry {
   missing?: boolean          // the linked item left the board without being done
 }
 
+// What was finished on an earlier day, kept for a week so the standup draft
+// can say what got done.
+export interface DoneRecord {
+  day: string
+  text: string
+  ref?: string
+}
+
 export interface Plan {
   day: string
   entries: PlanEntry[]
   mergedBriefs: string[]     // standup dates already turned into entries
+  doneLog?: DoneRecord[]
 }
+
+const DONE_LOG_DAYS = 7
+const DONE_LOG_MAX = 60
 
 const planKey = (developer: string) => `devDashboard.plan.${developer}`
 
@@ -49,10 +62,24 @@ export function savePlan(developer: string, plan: Plan) {
   try { localStorage.setItem(planKey(developer), JSON.stringify(plan)) } catch { /* storage unavailable */ }
 }
 
-// A new day drops finished entries; unfinished ones carry over.
+// A new day drops finished entries (noting them in the done log); unfinished
+// ones carry over.
 export function rollover(plan: Plan, today: string): Plan {
   if (plan.day === today) return plan
-  return { day: today, entries: plan.entries.filter(e => !e.done), mergedBriefs: plan.mergedBriefs.slice(-14) }
+  const finished = plan.entries.filter(e => e.done).map(e => ({ day: plan.day, text: e.text, ref: e.itemRef }))
+  const doneLog = [...(plan.doneLog ?? []), ...finished]
+    .filter(r => daysBetween(r.day, today) <= DONE_LOG_DAYS)
+    .slice(-DONE_LOG_MAX)
+  return { day: today, entries: plan.entries.filter(e => !e.done), mergedBriefs: plan.mergedBriefs.slice(-14), doneLog }
+}
+
+// What's been finished: the most recent earlier day that had anything done
+// (yesterday, or Friday on a Monday), then whatever is ticked off today.
+export function recentlyDone(plan: Plan): DoneRecord[] {
+  const log = (plan.doneLog ?? []).filter(r => r.day < plan.day)
+  const lastDay = log.reduce((latest, r) => (r.day > latest ? r.day : latest), '')
+  const today = plan.entries.filter(e => e.done).map(e => ({ day: plan.day, text: e.text, ref: e.itemRef }))
+  return [...log.filter(r => r.day === lastDay), ...today]
 }
 
 // Adds a standup's responsibilities once per standup date, at the top in the
