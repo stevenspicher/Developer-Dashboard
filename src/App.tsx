@@ -53,8 +53,8 @@ const SOURCE_TABS = ([
   { id: 'zendesk',    label: 'Zendesk' },
   { id: 'ads',        label: 'ADS' },
 ] satisfies { id: QueueSource; label: string }[])
-  // Only sources with a live queue: Zendesk has none yet, and Stories
-  // is off while ado-bridge serves mock data.
+  // Only sources with a live queue: Zendesk has none yet, and Stories is
+  // hidden when VITE_ADO_STORIES=false.
   .filter(tab => QUEUES.some(q => q.source === tab.id))
 
 type Tone = 'accent' | 'ok' | 'warn' | 'danger' | 'neutral' | 'muted'
