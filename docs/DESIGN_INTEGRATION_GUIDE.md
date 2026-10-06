@@ -606,6 +606,8 @@ Each phase is one pull request that can merge on its own. The classic view keeps
 
 ### Phase 2: shared atoms
 
+**Status (2026-10-06): built.** `src/ui/atoms.tsx`, `Overlay.tsx`, `Toast.tsx` and `labels.ts` are in, with the `/?ui=atoms` gallery and 44 tests (including keyboard behaviour for tabs and the overlay's focus trap, checked in a real browser too). `Button` is Inter sentence case, and the overlay drops the HUD corner brackets. The classic layout still uses its own copies and is untouched.
+
 - **Files:** new `src/ui/atoms.tsx`, `src/ui/Toast.tsx`, `src/ui/Overlay.tsx`.
 - **Build:** in Tailwind utilities, with the design's proportions and our rules:
   - `Chip` (neutral; variants only for status: ok, warn, danger),

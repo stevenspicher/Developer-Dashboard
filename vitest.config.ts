@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config'
 // vite.config.ts is left out because it loads the Figma Make plugins.
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 })

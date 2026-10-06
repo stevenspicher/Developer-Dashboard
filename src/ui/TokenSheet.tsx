@@ -1,11 +1,8 @@
-import { useEffect, useState } from 'react'
-
-import type { Density } from './theme'
+import { ThemeControls, useLook } from './ThemeControls'
 
 // A style sheet for the design tokens, at /?ui=tokens. It shows every colour
 // token on every surface and the shared classes, in either theme and density,
 // so a theme change can be checked by eye without running the whole app.
-// /?ui=tokens&theme=light&density=compact picks the look from the address.
 
 const SURFACES = ['bg', 'surface', 'sunken', 'raised'] as const
 const TEXT = [
@@ -26,27 +23,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function TokenSheet() {
-  const params = new URLSearchParams(window.location.search)
-  const [theme, setTheme] = useState<'dark' | 'light'>(params.get('theme') === 'light' ? 'light' : 'dark')
-  const [density, setDensity] = useState<Density>(params.get('density') === 'compact' ? 'compact' : 'comfortable')
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    document.documentElement.dataset.density = density
-  }, [theme, density])
+  const look = useLook()
 
   return (
     <div className="h-screen overflow-y-auto bg-bg p-6 font-sans text-fg">
       <div className="mb-6 flex items-center gap-3">
         <h1 className="text-display font-bold text-ink">Design tokens</h1>
-        <div className="ml-auto flex items-center gap-2">
-          {(['dark', 'light'] as const).map(t => (
-            <button key={t} className="btn-quiet" aria-pressed={theme === t} onClick={() => setTheme(t)}>{t.toUpperCase()}</button>
-          ))}
-          {(['comfortable', 'compact'] as const).map(d => (
-            <button key={d} className="btn-quiet" aria-pressed={density === d} onClick={() => setDensity(d)}>{d.toUpperCase()}</button>
-          ))}
-        </div>
+        <ThemeControls look={look} />
       </div>
 
       <Section title="TEXT ON SURFACES">
