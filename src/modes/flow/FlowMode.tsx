@@ -356,7 +356,7 @@ export default function FlowMode() {
                 </div>
                 {reviews === 'loading' && <div className="py-2 font-mono text-meta text-muted">Loading…</div>}
                 {reviews && !Array.isArray(reviews) && reviews !== 'loading' && (
-                  <ErrorNote>{reviews.error === 'Not Found' ? 'Reviews need an updated ado-bridge' : `Reviews unavailable · ${reviews.error}`}</ErrorNote>
+                  <ErrorNote>{reviews.error === 'Not Found' ? 'Open pull requests need an updated ado-bridge' : `Open pull requests unavailable · ${reviews.error}`}</ErrorNote>
                 )}
                 {Array.isArray(reviews) && reviews.length === 0 && <div className="py-2 text-note text-muted">No open pull requests.</div>}
                 {reviewList.some(pr => reviewAge(pr, today) >= STALE_REVIEW_DAYS) && <div className="sr-only">Some reviews have waited {STALE_REVIEW_DAYS} days or more.</div>}

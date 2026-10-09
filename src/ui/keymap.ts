@@ -39,7 +39,7 @@ export const GLOBAL_KEYS: GlobalKey[] = [
   { key: 'p', filter: 'plan', label: 'plan' },
   { key: 'q', filter: 'queue', label: 'queue' },
   { key: 'n', filter: 'next', label: 'up next' },
-  { key: 'r', filter: 'reviews', label: 'reviews' },
+  { key: 'r', filter: 'reviews', label: 'open pull requests' },
 ]
 
 export const filterForKey = (key: string): Filter | undefined => GLOBAL_KEYS.find(g => g.key === key)?.filter
@@ -51,7 +51,7 @@ export type FlowTarget = 'plan' | 'next' | 'reviews' | 'drawer'
 export const FLOW_KEYS: { key: string; target: FlowTarget; label: string }[] = [
   { key: 'p', target: 'plan', label: 'plan' },
   { key: 'n', target: 'next', label: 'up next' },
-  { key: 'r', target: 'reviews', label: 'reviews' },
+  { key: 'r', target: 'reviews', label: 'open pull requests' },
   { key: 'q', target: 'drawer', label: 'queues' },
 ]
 

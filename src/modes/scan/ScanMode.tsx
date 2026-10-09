@@ -229,7 +229,7 @@ export default function ScanMode() {
     { id: 'plan' as Filter, label: 'Plan', count: openEntries },
     { id: 'queue' as Filter, label: 'Queue', count: unplannedCount() },
     { id: 'next' as Filter, label: 'Next', count: upNext.length },
-    { id: 'reviews' as Filter, label: 'Reviews', count: reviewList.length },
+    { id: 'reviews' as Filter, label: 'Open pull requests', count: reviewList.length },
     { id: 'blocked' as Filter, label: 'Blocked', count: blockedTasks.length },
     ...(lead ? [{ id: 'team' as Filter, label: 'Team', count: team.members.length }] : []),
   ]
@@ -263,8 +263,8 @@ export default function ScanMode() {
     if (filter === 'next') return <EmptyState title="Nothing waiting outside your plan" />
     if (filter === 'reviews') {
       if (reviews === 'loading') return <EmptyState title="Loading…" />
-      if (reviews && !Array.isArray(reviews)) return <div className="p-3"><ErrorNote>{reviews.error === 'Not Found' ? 'Reviews need an updated ado-bridge' : `Reviews unavailable · ${reviews.error}`}</ErrorNote></div>
-      return <EmptyState title={reviews === null ? 'Reviews need ado-bridge' : 'No open pull requests'} />
+      if (reviews && !Array.isArray(reviews)) return <div className="p-3"><ErrorNote>{reviews.error === 'Not Found' ? 'Open pull requests need an updated ado-bridge' : `Open pull requests unavailable · ${reviews.error}`}</ErrorNote></div>
+      return <EmptyState title={reviews === null ? 'Open pull requests need ado-bridge' : 'No open pull requests'} />
     }
     if (filter === 'blocked') return <EmptyState title="Nothing is blocked" hint="Press b on an item, or drop it on this tab." />
     return <EmptyState title="No developer updates in this summary" />
