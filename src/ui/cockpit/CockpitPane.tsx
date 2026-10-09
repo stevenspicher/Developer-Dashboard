@@ -9,6 +9,7 @@ import { linkTarget } from './links'
 import { LinkedItemsPanel } from './LinkedItems'
 import { NotesPanel } from './Notes'
 import { ProjectContext } from './ProjectContext'
+import { StoryRequestControl } from './StoryRequest'
 
 // Everything needed to finish an item, in one place: a header, an action bar
 // that follows the item's lane, then the description, checklist and notes with
@@ -33,6 +34,8 @@ export function CockpitPane({ task, sourceLabel, planned, working = false, doneT
   layout?: CockpitLayout
 }) {
   const { actions, inPlan } = laneActions(task, { planned, canDone: doneTarget !== null && !!handlers.done })
+  // Done sits at the far end, after the story request controls.
+  const done = actions.find(a => a.id === 'done')
 
   return (
     <div className={`@container flex flex-col ${layout === 'pane' ? 'min-h-0 flex-1' : ''}`}>
@@ -43,11 +46,12 @@ export function CockpitPane({ task, sourceLabel, planned, working = false, doneT
               <span aria-hidden className="pulse size-2 rounded-full bg-ok" />Working
             </span>
           )}
-          <TypeChip type={task.type} />
-          <Ref>{task.ref ?? task.id}</Ref>
+          <TypeChip type={task.type} source={task.source} name={task.typeName} />
+          <Ref source={task.source}>{task.ref ?? task.id}</Ref>
           {sourceLabel && <span className="text-meta text-muted">via {sourceLabel}</span>}
           {task.externalState && <Chip title="State in its source">{task.externalState}</Chip>}
-          {task.url && <a href={task.url} target="_blank" rel="noreferrer" className="link text-note">Open in {linkTarget(task.url)} ↗</a>}
+          {/* Only stories link to their page: a Notion item's page adds nothing the pane doesn't show. */}
+          {task.url && task.source === 'stories' && <a href={task.url} target="_blank" rel="noreferrer" className="link text-note">Open in {linkTarget(task.url)} ↗</a>}
           {task.link && <a href={task.link} target="_blank" rel="noreferrer" className="link text-note">Ticket ↗</a>}
           <span className="ml-auto flex items-center gap-2.5">
             <PriorityBadge priority={task.priority} />
@@ -60,7 +64,7 @@ export function CockpitPane({ task, sourceLabel, planned, working = false, doneT
       </header>
 
       <div role="toolbar" aria-label="Item actions" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line-soft bg-sunken px-4 py-2">
-        {actions.map(a => {
+        {actions.filter(a => a.id !== 'done').map(a => {
           const run = handlers[a.id]
           if (!run) return null
           const draggable = a.id === 'return' && onReturnDragStart
@@ -69,16 +73,19 @@ export function CockpitPane({ task, sourceLabel, planned, working = false, doneT
               key={a.id}
               variant={a.variant}
               onClick={run}
-              title={a.id === 'done' ? `Mark done in ${doneTarget}` : draggable ? "Click to put it back in today's plan, or drag it back to the queue" : undefined}
+              title={draggable ? "Click to put it back in today's plan, or drag it back to the queue" : undefined}
               draggable={draggable ? true : undefined}
               onDragStart={draggable ? onReturnDragStart : undefined}
-              className={a.id === 'done' ? 'ml-auto' : undefined}
             >
               {a.label}
             </Button>
           )
         })}
         {inPlan && <Chip>In today's plan</Chip>}
+        <StoryRequestControl task={task} />
+        {done && handlers.done && (
+          <Button variant={done.variant} onClick={handlers.done} title={`Mark done in ${doneTarget}`} className="ml-auto">{done.label}</Button>
+        )}
       </div>
 
       <div className={layout === 'pane' ? 'min-h-0 flex-1 overflow-y-auto' : ''}>

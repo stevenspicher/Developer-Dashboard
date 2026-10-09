@@ -1,14 +1,26 @@
-import type { Priority, TaskType } from '../types'
+import type { Priority, QueueSource, TaskType } from '../types'
 
-// The words and tones the shared components use for item data. Colour carries
-// status only (accent = interactive, ok = done or active, warn = needs
-// attention, danger = critical, blocked or failed); sources and item types are
-// never colour-coded, and MED and LOW stay neutral so CRIT and HIGH stand out.
+// The words and tones the shared components use for item data. Status colours
+// (accent = interactive, ok = done or active, warn = needs attention, danger =
+// critical, blocked or failed) carry status only, and MED and LOW stay neutral
+// so CRIT and HIGH stand out. Each source has its own colour (the --src-*
+// tokens), so Stories, Tasks, Pulse, Solarwinds and ADS items tell apart at a glance.
 
 export type Tone = 'neutral' | 'muted' | 'accent' | 'ok' | 'warn' | 'danger'
 
 export const TYPE_LABELS: Record<TaskType, string> = {
   story: 'STORY', task: 'TASK', bug: 'BUG', spike: 'SPIKE', alert: 'ALERT', ticket: 'TICKET', incident: 'INCIDENT',
+}
+
+// Each source's colour, as whole class names so Tailwind sees them: `stripe` is
+// a row's left edge, `text` its ref, `chip` the type chip.
+export const SOURCE_COLOR: Record<QueueSource, { stripe: string; text: string; chip: string }> = {
+  stories: { stripe: 'border-l-src-stories', text: 'text-src-stories', chip: 'border-src-stories/40 bg-src-stories/10 text-src-stories' },
+  tasks: { stripe: 'border-l-src-tasks', text: 'text-src-tasks', chip: 'border-src-tasks/40 bg-src-tasks/10 text-src-tasks' },
+  pulse: { stripe: 'border-l-src-pulse', text: 'text-src-pulse', chip: 'border-src-pulse/40 bg-src-pulse/10 text-src-pulse' },
+  solarwinds: { stripe: 'border-l-src-solarwinds', text: 'text-src-solarwinds', chip: 'border-src-solarwinds/40 bg-src-solarwinds/10 text-src-solarwinds' },
+  ads: { stripe: 'border-l-src-ads', text: 'text-src-ads', chip: 'border-src-ads/40 bg-src-ads/10 text-src-ads' },
+  zendesk: { stripe: 'border-l-line-strong', text: 'text-dim', chip: '' },
 }
 
 // Items without a priority show none.

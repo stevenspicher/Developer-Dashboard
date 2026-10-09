@@ -1,4 +1,4 @@
-import type { PullRequest } from '../bridge'
+import type { PullRequest, StoryRequest } from '../bridge'
 import type { Plan, PlanEntry } from '../plan'
 import type { Reason } from '../ranking'
 import type { Task } from '../types'
@@ -11,6 +11,7 @@ export type ReaderTab = 'brief' | 'ticker' | 'calendar' | 'draft'
 
 // Pull requests waiting on the developer. Null when there's no ado-bridge to ask.
 export type Reviews = PullRequest[] | 'loading' | { error: string } | null
+export type StoryRequests = StoryRequest[] | 'loading' | { error: string }
 
 // What the layouts ask the board to do.
 export interface DayActions {

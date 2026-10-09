@@ -26,7 +26,7 @@ export const ROW_KEYS: RowKey[] = [
 // Moving between rows works on every list, whatever the row can do.
 export const MOVE_HINT = { hint: 'j k', label: 'move' }
 
-export type Filter = 'plan' | 'queue' | 'next' | 'reviews' | 'blocked' | 'team'
+export type Filter = 'plan' | 'queue' | 'next' | 'reviews' | 'blocked' | 'team' | 'requests'
 
 // Keys that act on the whole layout, not a row.
 export interface GlobalKey {

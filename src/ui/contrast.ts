@@ -70,7 +70,10 @@ export function readTokens(css: string, theme: ThemeName): Record<string, string
 // ─── The checks ───────────────────────────────────────────────────────────────
 
 // Text colours, and the surfaces they must read on. --faint is decoration only.
-export const TEXT_TOKENS = ['ink', 'fg', 'dim', 'muted', 'accent', 'ok', 'warn', 'danger', 'danger-fg'] as const
+export const TEXT_TOKENS = [
+  'ink', 'fg', 'dim', 'muted', 'accent', 'ok', 'warn', 'danger', 'danger-fg',
+  'src-stories', 'src-tasks', 'src-pulse', 'src-solarwinds', 'src-ads',
+] as const
 export const SURFACE_TOKENS = ['bg', 'surface', 'sunken', 'raised'] as const
 export const MIN_RATIO = 4.5
 

@@ -55,8 +55,12 @@ describe('ticks storage', () => {
 describe('refsIn', () => {
   it('finds refs in the dashboard formats and ADO mentions, unique and in order', () => {
     expect(refsIn('See US-123 and BLUEADS-222, DEV-A1B2C3 and SW-4021. Also #12345 and US-123 again')).toEqual([
-      'US-123', 'BLUEADS-222', 'DEV-A1B2C3', 'SW-4021', 'US-12345',
+      'US-123', 'BLUEADS-222', 'DEV-A1B2C3', 'SW-4021', '#12345',
     ])
+  })
+
+  it('gives every ADO ref its #number too, so any work item type matches a # mention', () => {
+    expect(refsIn('US-12345, BUG-12346 and TASK-12347')).toEqual(['US-12345', '#12345', 'BUG-12346', '#12346', 'TASK-12347', '#12347'])
   })
 
   it('ignores things that only look like refs', () => {
@@ -89,5 +93,14 @@ describe('crossRefs', () => {
     const long = makeTask({ id: '12345', ref: 'US-12345' })
     const mention = makeTask({ id: 'q', ref: 'DEV-Q', description: 'Related to #12345' })
     expect(crossRefs(long, [long, mention]).mentionedBy.map(t => t.id)).toEqual(['q'])
+  })
+
+  it('matches a bug by its BUG- ref or its #number, either way round', () => {
+    const bug = makeTask({ id: '12346', ref: 'BUG-12346', source: 'stories', type: 'bug' })
+    const byHash = makeTask({ id: 'a', ref: 'DEV-A', description: 'Caused by #12346' })
+    const byRef = makeTask({ id: 'b', ref: 'DEV-B', description: 'See BUG-12346' })
+    expect(crossRefs(bug, [bug, byHash, byRef]).mentionedBy.map(t => t.id)).toEqual(['a', 'b'])
+    const names = makeTask({ id: 'c', ref: 'DEV-C', description: 'Blocked by #12346' })
+    expect(crossRefs(names, [names, bug]).mentions.map(t => t.id)).toEqual(['12346'])
   })
 })

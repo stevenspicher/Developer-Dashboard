@@ -49,15 +49,24 @@ export const tickedCount = (ticks: Ticks, task: Task) =>
 
 // ─── Related items across sources ─────────────────────────────────────────────
 
-// Refs as the dashboard shows them: US-12345, BLUEADS-222, SW-4021, DEV-A1B2C3.
+// Refs as the dashboard shows them: US-12345, BUG-12346, BLUEADS-222, SW-4021, DEV-A1B2C3.
 const REF_TOKEN = /\b[A-Z][A-Z0-9]*-[0-9A-Z]{2,}\b/g
-// ADO's own way to mention a work item.
+// ADO's own way to mention a work item, which says nothing of its type.
 const ADO_MENTION = /(?:^|[^\w&])#(\d{4,6})\b/g
+
+// The refs a text names, plus "#12345" for each ADO work item it names, by
+// either kind of mention, so a story and a bug match on their number alone.
+const ADO_REF = /^(?:US|BUG|HOTFIX|TASK|SPIKE|FEAT|EPIC|WI)-(\d{4,6})$/i
+const adoNumber = (ref: string) => ref.match(ADO_REF)?.[1]
 
 export function refsIn(text: string): string[] {
   const found = new Set<string>()
-  for (const m of text.matchAll(REF_TOKEN)) found.add(m[0].toUpperCase())
-  for (const m of text.matchAll(ADO_MENTION)) found.add(`US-${m[1]}`)
+  for (const m of text.matchAll(REF_TOKEN)) {
+    found.add(m[0].toUpperCase())
+    const n = adoNumber(m[0])
+    if (n) found.add(`#${n}`)
+  }
+  for (const m of text.matchAll(ADO_MENTION)) found.add(`#${m[1]}`)
   return [...found]
 }
 
@@ -75,9 +84,11 @@ export interface CrossRefs {
 // when someone wrote one ref in the other.
 export function crossRefs(task: Task, tasks: Task[]): CrossRefs {
   const others = tasks.filter(t => t.id !== task.id && t.ref)
-  const byRef = new Map(others.map(t => [t.ref!.toUpperCase(), t]))
-  const mentions = refsIn(textOf(task)).flatMap(ref => byRef.get(ref) ?? [])
-  const mine = task.ref?.toUpperCase()
-  const mentionedBy = mine ? others.filter(t => refsIn(textOf(t)).includes(mine)) : []
+  // ADO items answer to "#12345" too.
+  const keysOf = (t: Task) => [t.ref!.toUpperCase(), ...(adoNumber(t.ref!) ? [`#${adoNumber(t.ref!)}`] : [])]
+  const byRef = new Map(others.flatMap(t => keysOf(t).map(k => [k, t] as const)))
+  const mentions = [...new Set(refsIn(textOf(task)).flatMap(ref => byRef.get(ref) ?? []))]
+  const mine = task.ref ? keysOf(task) : []
+  const mentionedBy = mine.length ? others.filter(t => refsIn(textOf(t)).some(r => mine.includes(r))) : []
   return { mentions: mentions.slice(0, MAX_CROSS_REFS), mentionedBy: mentionedBy.slice(0, MAX_CROSS_REFS) }
 }

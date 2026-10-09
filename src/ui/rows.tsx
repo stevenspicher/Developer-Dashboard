@@ -1,15 +1,16 @@
 import type { DragEvent, ReactNode } from 'react'
 
-import type { PullRequest } from '../bridge'
+import type { PullRequest, StoryRequest } from '../bridge'
 import { daysBetween } from '../bridge'
 import { rowKeys } from '../keys'
 import type { RowAction } from '../keys'
 import type { PlanEntry } from '../plan'
 import type { Reason } from '../ranking'
 import { monthDay } from '../schedule'
-import type { Task } from '../types'
-import { Button, Checkbox, Chip, PriorityBadge, Ref } from './atoms'
+import type { QueueSource, Task } from '../types'
+import { Button, Checkbox, Chip, OnPlanBadge, PriorityBadge, Ref } from './atoms'
 import { AcceptanceProgress } from './cockpit/Checklist'
+import { SOURCE_COLOR } from './labels'
 
 // The rows of the list-and-pane layouts. Each is a focusable `data-row` inside a
 // `data-rows` list, driven by `rowKeys` (see keymap.ts); focusing or clicking one
@@ -23,7 +24,7 @@ export type Handlers = Partial<Record<RowAction, () => void>>
 
 const stop = (fn: () => void) => (e: React.SyntheticEvent) => { e.stopPropagation(); fn() }
 
-function Row({ id, selected, onSelect, onActivate, handlers, draggable, onDragStart, onDragOver, onDrop, flash, tint, children }: {
+function Row({ id, selected, onSelect, onActivate, handlers, draggable, onDragStart, onDragOver, onDrop, flash, tint, stripe, children }: {
   id: string
   selected: boolean
   onSelect: () => void
@@ -36,6 +37,8 @@ function Row({ id, selected, onSelect, onActivate, handlers, draggable, onDragSt
   onDrop?: (e: DragEvent) => void
   flash?: boolean
   tint?: boolean
+  // The left edge's colour when not selected: the item's source.
+  stripe?: string
   children: ReactNode
 }) {
   return (
@@ -52,8 +55,8 @@ function Row({ id, selected, onSelect, onActivate, handlers, draggable, onDragSt
       onClick={onActivate ?? onSelect}
       onKeyDown={rowKeys(handlers)}
       className={[
-        'row group flex items-start gap-2.5 border-b border-line-soft border-l-2 py-2 pl-2 pr-2',
-        selected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent',
+        'row group flex items-start gap-2.5 border-b border-line-soft border-l-4 py-2 pl-2 pr-2',
+        selected ? 'border-l-accent bg-accent/[0.07]' : stripe ?? 'border-l-transparent',
         tint && !selected ? 'bg-ok/5' : '',
         flash ? 'row-flash' : '',
       ].join(' ')}
@@ -107,6 +110,7 @@ export function PlanListRow({ entry, task, id, selected, working, today, highlig
       draggable
       flash={highlight}
       tint={working}
+      stripe={task ? SOURCE_COLOR[task.source].stripe : entry.itemSource ? SOURCE_COLOR[entry.itemSource].stripe : undefined}
       onDragStart={e => { e.dataTransfer.setData(ENTRY_DRAG, entry.id); e.dataTransfer.effectAllowed = 'move' }}
       onDragOver={e => { if (e.dataTransfer.types.includes(ENTRY_DRAG)) e.preventDefault() }}
       onDrop={e => {
@@ -123,7 +127,7 @@ export function PlanListRow({ entry, task, id, selected, working, today, highlig
       <div className="min-w-0 flex-1">
         <div className={`line-clamp-2 text-body ${entry.done ? 'text-muted line-through' : 'text-ink'}`} title={title}>{title}</div>
         <div className="mt-1 flex flex-wrap items-center gap-1">
-          {(task?.ref ?? entry.itemRef) && <Ref>{task?.ref ?? entry.itemRef}</Ref>}
+          {(task?.ref ?? entry.itemRef) && <Ref source={task?.source ?? entry.itemSource}>{task?.ref ?? entry.itemRef}</Ref>}
           {working && <Chip tone="ok">Working</Chip>}
           {task?.status === 'blocked' && <Chip tone="danger">Blocked</Chip>}
           {!entry.itemId && !entry.done && <Chip>Not linked</Chip>}
@@ -138,11 +142,13 @@ export function PlanListRow({ entry, task, id, selected, working, today, highlig
 
 // ─── Board items: queue, up next, blocked ─────────────────────────────────────
 
-export function TaskListRow({ task, id, selected, reasons, handlers, onSelect, onActivate, onDragStart, quick }: {
+export function TaskListRow({ task, id, selected, reasons, onPlan, handlers, onSelect, onActivate, onDragStart, quick }: {
   task: Task
   id: string
   selected: boolean
   reasons?: Reason[]
+  // A queue item that is in today's plan too.
+  onPlan?: boolean
   handlers: Handlers
   onSelect: () => void
   onActivate?: () => void
@@ -150,11 +156,12 @@ export function TaskListRow({ task, id, selected, reasons, handlers, onSelect, o
   quick?: ReactNode
 }) {
   return (
-    <Row id={id} selected={selected} onSelect={onSelect} onActivate={onActivate} handlers={handlers} draggable onDragStart={onDragStart}>
+    <Row id={id} selected={selected} onSelect={onSelect} onActivate={onActivate} handlers={handlers} draggable onDragStart={onDragStart} stripe={SOURCE_COLOR[task.source].stripe}>
       <div className="min-w-0 flex-1">
         <div className="line-clamp-2 text-body text-ink" title={task.title}>{task.title}</div>
         <div className="mt-1 flex flex-wrap items-center gap-1">
-          <Ref>{task.ref}</Ref>
+          {onPlan && <OnPlanBadge />}
+          <Ref source={task.source}>{task.ref}</Ref>
           <PriorityBadge priority={task.priority} />
           {task.externalState && <Chip>{task.externalState}</Chip>}
           <AcceptanceProgress task={task} />
@@ -220,3 +227,38 @@ export function TeamListRow({ developer, text, blockedCount, id, selected, handl
     </Row>
   )
 }
+
+// ─── User story requests (the story owner's list) ─────────────────────────────
+
+export function RequestListRow({ request, today, id, selected, handlers, onSelect, onActivate }: {
+  request: StoryRequest
+  today: string
+  id: string
+  selected: boolean
+  handlers: Handlers
+  onSelect: () => void
+  onActivate?: () => void
+}) {
+  const source = requestSource(request)
+  const days = request.createdAt ? daysBetween(request.createdAt.slice(0, 10), today) : 0
+  return (
+    <Row id={id} selected={selected} onSelect={onSelect} onActivate={onActivate} handlers={handlers} stripe={source ? SOURCE_COLOR[source].stripe : undefined}>
+      <div className="min-w-0 flex-1">
+        <div className="line-clamp-2 text-body text-ink" title={request.title}>{request.title}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-muted">
+          {request.itemRef && <Ref source={source}>{request.itemRef}</Ref>}
+          <span>{requesterName(request.requestedBy)}</span>
+          <span>{days <= 0 ? 'today' : `${days}d ago`}</span>
+        </div>
+      </div>
+    </Row>
+  )
+}
+
+// The queue source a request's item came from, by the label stored on it.
+export const requestSource = (r: StoryRequest): QueueSource | undefined =>
+  (({ Tasks: 'tasks', Pulse: 'pulse', Solarwinds: 'solarwinds', ADS: 'ads' }) as Record<string, QueueSource>)[r.source]
+
+// "philip.fiesta@bluefcu.com" → "Philip Fiesta".
+export const requesterName = (email: string) =>
+  email.split('@')[0].split(/[._]/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ')

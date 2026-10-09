@@ -15,6 +15,9 @@ export interface Task {
   externalState?: string
   parentId?: string
   type: TaskType
+  // The source's own name for the type, when it has more than TaskType covers
+  // (ADO's "Feature", "Technical Debt").
+  typeName?: string
   source: QueueSource
   title: string
   description: string

@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { PullRequest } from '../bridge'
+import type { PullRequest, StoryRequest } from '../bridge'
 import { click, key, mount, run } from '../test/render'
 import { makeEntry, makeTask } from '../test/factories'
 import { CockpitContext } from './cockpit/context'
-import { PlanListRow, ReviewListRow, TaskListRow, TeamListRow } from './rows'
+import { PlanListRow, RequestListRow, ReviewListRow, TaskListRow, TeamListRow, requesterName } from './rows'
+import { StoryRequestCard } from './StoryRequestCard'
+import { type as typeInto } from '../test/render'
 
 afterEach(() => { document.body.innerHTML = '' })
 
-const board = { tasks: [], ticks: {}, developer: 'a@x.com', toggleTick: () => {}, openTask: () => {} }
+const board = { tasks: [], ticks: {}, developer: 'a@x.com', toggleTick: () => {}, openTask: () => {}, storyRequest: () => undefined, requests: [], requestsReady: true, askForStory: () => {} }
 const inList = (node: React.ReactNode) => <CockpitContext.Provider value={board}><div data-rows="scan">{node}</div></CockpitContext.Provider>
 const rowOf = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-row]')!
 const focus = (el: HTMLElement) => run(() => el.focus())
@@ -167,6 +169,59 @@ describe('ReviewListRow', () => {
     ui = mount(inList(<ReviewListRow pr={pr({ createdDate: '2026-10-06T08:00:00Z', isRequired: false })} id="r" selected={false} today="2026-10-06" handlers={{}} onSelect={() => {}} />))
     expect(ui.container.textContent).toContain('opened today')
     expect(ui.container.querySelector('.text-warn')).toBeNull()
+    ui.unmount()
+  })
+})
+
+describe('queue items', () => {
+  const taskProps = { id: 'task:t1', selected: false, handlers: {}, onSelect: vi.fn(), onDragStart: vi.fn() }
+
+  it('marks an item that is in the plan ON PLAN', () => {
+    let ui = mount(inList(<TaskListRow task={makeTask()} onPlan {...taskProps} />))
+    expect(ui.container.textContent).toContain('ON PLAN')
+    ui.unmount()
+    ui = mount(inList(<TaskListRow task={makeTask()} {...taskProps} />))
+    expect(ui.container.textContent).not.toContain('ON PLAN')
+    ui.unmount()
+  })
+
+  it('edges each row in its source\'s colour', () => {
+    for (const source of ['stories', 'tasks', 'pulse', 'solarwinds', 'ads'] as const) {
+      const ui = mount(inList(<TaskListRow task={makeTask({ source })} {...taskProps} />))
+      expect(rowOf(ui.container).className).toContain(`border-l-src-${source}`)
+      ui.unmount()
+    }
+  })
+})
+
+describe('story requests', () => {
+  const request = (over: Partial<StoryRequest> = {}): StoryRequest => ({
+    id: 'r1', itemId: 't1', itemRef: 'PULSE-ABC', itemUrl: 'https://www.notion.so/x', title: 'Fix login', source: 'Pulse',
+    requestedBy: 'philip.fiesta@bluefcu.com', status: 'Requested', storyId: null, createdAt: '2026-10-06T10:00:00.000Z', ...over,
+  })
+
+  it('names the requester from their email', () => {
+    expect(requesterName('philip.fiesta@bluefcu.com')).toBe('Philip Fiesta')
+    expect(requesterName('jdoe@x.com')).toBe('Jdoe')
+  })
+
+  it('lists a request with its item, requester and age, edged in the item\'s source colour', () => {
+    const ui = mount(inList(<RequestListRow request={request()} today="2026-10-08" id="request:r1" selected={false} handlers={{}} onSelect={vi.fn()} />))
+    for (const piece of ['Fix login', 'PULSE-ABC', 'Philip Fiesta', '2d ago']) expect(ui.container.textContent).toContain(piece)
+    expect(rowOf(ui.container).className).toContain('border-l-src-pulse')
+    ui.unmount()
+  })
+
+  it('lets the owner record the story made for it, or decline', () => {
+    const onAnswer = vi.fn()
+    const ui = mount(<StoryRequestCard request={request()} onAnswer={onAnswer} />)
+    const button = (label: string) => [...ui.container.querySelectorAll('button')].find(b => b.textContent === label)!
+    expect(button('Link story').disabled).toBe(true)
+    typeInto(ui.container.querySelector('input')!, '12346')
+    click(button('Link story'))
+    click(button('Decline'))
+    expect(onAnswer.mock.calls).toEqual([[{ storyId: 12346 }], [{ status: 'Declined' }]])
+    expect(ui.container.querySelector('a')!.textContent).toBe('Open item ↗')
     ui.unmount()
   })
 })

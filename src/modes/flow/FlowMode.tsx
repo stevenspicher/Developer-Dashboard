@@ -20,6 +20,7 @@ import { Header } from '../../ui/Header'
 import { flowTargetForKey, hintsFor } from '../../ui/keymap'
 import { LinkPicker } from '../../ui/LinkPicker'
 import { QueueDrawer } from '../../ui/QueueDrawer'
+import { StoryRequestCard } from '../../ui/StoryRequestCard'
 import { BriefView, CalendarView, Reader, TickerView } from '../../ui/Reader'
 import { ENTRY_DRAG, PlanListRow, ReviewListRow, TaskListRow, reviewAge, STALE_REVIEW_DAYS } from '../../ui/rows'
 import type { Handlers } from '../../ui/rows'
@@ -44,29 +45,32 @@ const focusRow = (list: string) => document.querySelector<HTMLElement>(`[data-ro
 
 type Actions = Board['actions']
 
-// What a row in Up next, Blocked or the drawer responds to.
-const itemHandlers = (task: Task, mode: 'queue' | 'next' | 'blocked', actions: Actions): Handlers => ({
+// What a row in Up next, Blocked or the drawer responds to. A drawer item that
+// is in the plan already can't be added again.
+const itemHandlers = (task: Task, mode: 'queue' | 'next' | 'blocked', actions: Actions, onPlan = false): Handlers => ({
   open: () => actions.open(task),
   start: () => actions.start(task),
-  add: mode === 'blocked' ? () => actions.unblock(task) : () => actions.add(task),
+  add: mode === 'blocked' ? () => actions.unblock(task) : onPlan ? undefined : () => actions.add(task),
   block: mode === 'blocked' ? undefined : () => actions.block(task),
   done: actions.doneTarget(task) ? () => actions.done(task) : undefined,
 })
 
 // A row for an item in Up next, Blocked or the drawer.
-function ItemRow({ task, mode, actions, reasons }: {
+function ItemRow({ task, mode, actions, reasons, onPlan = false }: {
   task: Task
   mode: 'queue' | 'next' | 'blocked'
   actions: Actions
   reasons?: { text: string; urgent?: boolean }[]
+  onPlan?: boolean
 }) {
-  const handlers = itemHandlers(task, mode, actions)
+  const handlers = itemHandlers(task, mode, actions, onPlan)
   return (
     <TaskListRow
       task={task}
       id={`task:${mode}:${task.id}`}
       selected={false}
       reasons={reasons}
+      onPlan={onPlan}
       handlers={handlers}
       onSelect={() => {}}
       onActivate={() => actions.open(task)}
@@ -75,7 +79,7 @@ function ItemRow({ task, mode, actions, reasons }: {
         <>
           {mode === 'blocked'
             ? <Button onClick={stop(() => actions.unblock(task))} title="Move back to today's plan (t)">Unblock</Button>
-            : <Button onClick={stop(() => actions.add(task))} title={task.source === 'pulse' ? "Add to today's plan and claim it (t)" : "Add to today's plan (t)"}>{task.source === 'pulse' ? '＋ Claim' : '＋ Plan'}</Button>}
+            : !onPlan && <Button onClick={stop(() => actions.add(task))} title={task.source === 'pulse' ? "Add to today's plan and claim it (t)" : "Add to today's plan (t)"}>{task.source === 'pulse' ? '＋ Claim' : '＋ Plan'}</Button>}
           <Button onClick={stop(() => actions.start(task))} title="Start working on it (s)" aria-label="Start">▶</Button>
         </>
       }
@@ -88,10 +92,10 @@ export default function FlowMode() {
   const {
     visibleTasks, plan, tasksById, ticks, developer, currentDeveloper, today, sprint, brief, briefData, reviews, teamBlockers,
     bridgeLoading, bridgeErrors, actionError, toast, booting, workingTask, modalTask, linkFor, reader, queueTab, planned,
-    queueTasks, blockedTasks, openEntries, upNext, planView, linkCandidates, unplannedCount, countOf, progress, events,
+    queueTasks, blockedTasks, openEntries, upNext, planView, linkCandidates, queueCount, progress, events,
     sprintHeader, sprintDay, sprintLength, tickerItems, calendarItems, bootSteps, bootSummary, actions, cockpit, dragId,
     moveTask, changeDeveloper, openMention, setQueueTab, closeDetail, dismissError, linkEntry, unlinkEntry, closePicker,
-    setReader, closeReader, undoToast, dismissToast, finishBoot,
+    setReader, closeReader, undoToast, dismissToast, finishBoot, storyRequests, openRequests, isStoryOwner, answerRequest,
   } = board
 
   const wide = useMediaQuery('(min-width: 900px)')
@@ -111,8 +115,9 @@ export default function FlowMode() {
   const noteUsed = (h: Handlers) => (Object.keys(h) as RowAction[]).forEach(action => { if (h[action]) used.add(action) })
   // Noted while this layout renders: a row component would render after the hints are built.
   const itemRow = (task: Task, mode: 'queue' | 'next' | 'blocked', reasons?: { text: string; urgent?: boolean }[]) => {
-    noteUsed(itemHandlers(task, mode, actions))
-    return <ItemRow key={task.id} task={task} mode={mode} actions={actions} reasons={reasons} />
+    const onPlan = mode === 'queue' && planned.has(task.id)
+    noteUsed(itemHandlers(task, mode, actions, onPlan))
+    return <ItemRow key={task.id} task={task} mode={mode} actions={actions} reasons={reasons} onPlan={onPlan} />
   }
 
   // ── Keys that act on the whole page.
@@ -363,6 +368,15 @@ export default function FlowMode() {
               </Section>
             )}
 
+            {isStoryOwner && (
+              <Section id="flow-requests" label="Story requests" count={openRequests.length || undefined}>
+                {openRequests.map(r => <StoryRequestCard key={r.id} request={r} compact onAnswer={answer => answerRequest(r, answer)} />)}
+                {storyRequests === 'loading' && <div className="py-2 font-mono text-meta text-muted">Loading…</div>}
+                {storyRequests !== 'loading' && !Array.isArray(storyRequests) && <ErrorNote>Story requests unavailable · {storyRequests.error}</ErrorNote>}
+                {Array.isArray(storyRequests) && openRequests.length === 0 && <div className="py-2 text-note text-muted">No open story requests.</div>}
+              </Section>
+            )}
+
             <Section id="flow-coming" label="Coming up" right={<SectionLink onClick={() => setReader('calendar')}>Calendar ⤢</SectionLink>}>
               <ComingUp events={events} today={today} />
             </Section>
@@ -384,7 +398,7 @@ export default function FlowMode() {
             <Tabs
               label="Sources"
               dense
-              tabs={SOURCE_TABS.map(t => ({ id: t.id, label: t.label, count: unplannedCount(t.id) }))}
+              tabs={SOURCE_TABS.map(t => ({ id: t.id, label: t.label, count: queueCount(t.id) }))}
               value={queueTab}
               onChange={setQueueTab}
               className="shrink-0 overflow-x-auto px-1"
@@ -395,7 +409,7 @@ export default function FlowMode() {
               {queueTasks.length === 0 && (
                 bridgeLoading && QUEUES.some(q => q.source === queueTab)
                   ? <EmptyState title="Loading…" />
-                  : <EmptyState title={countOf(queueTab) === 0 ? 'No items in this queue' : 'Everything here is in your plan'} />
+                  : <EmptyState title="No items in this queue" />
               )}
             </div>
           </QueueDrawer>

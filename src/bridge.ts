@@ -1,4 +1,4 @@
-import type { Priority, QueueSource, Status, Task } from './types'
+import type { Priority, QueueSource, Status, Task, TaskType } from './types'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -13,7 +13,7 @@ export const CALENDAR_LOOKAHEAD_DAYS = 42
 export const TEST_DEVELOPERS = [
   { name: 'Steven Spicher', email: 'steven.spicher@bluefcu.com' },
   { name: 'Philip Fiesta', email: 'philip.fiesta@bluefcu.com' },
-  { name: 'Justice', email: 'justice.dunn@bluefcu.com' },
+  { name: 'Justice Dunn', email: 'justice.dunn@bluefcu.com' },
   { name: 'Luiz Padredi', email: 'luiz.padredi@bluefcu.com' },
   { name: 'Brett Owers', email: 'brett.owers@bluefcu.com' },
   { name: 'Taylor Miller', email: 'taylor.miller@bluefcu.com' },
@@ -151,6 +151,45 @@ export const releaseItem = (id: string, queue: string, developer: string) =>
 export const markItemDone = (id: string, queue: string, developer: string) =>
   post(`/items/${id}/done`, { developer, queue })
 
+// ─── User story requests ──────────────────────────────────────────────────────
+
+// Who turns requests into User Stories: the requests list shows on their board.
+export const STORY_REQUEST_OWNER = 'steven.spicher@bluefcu.com'
+
+// A request for a User Story for a task, Pulse item or ticket, one per item,
+// kept in Notion's User Story Requests database. Linked once it has a story id,
+// whether the owner made the story or a developer linked an existing one.
+export interface StoryRequest {
+  id: string
+  itemId: string
+  itemRef: string
+  itemUrl: string | null
+  title: string
+  source: string
+  requestedBy: string
+  status: 'Requested' | 'Linked' | 'Declined'
+  storyId: number | null
+  createdAt: string | null
+}
+
+export const fetchStoryRequests = () => request<{ requests: StoryRequest[] }>('/story-requests').then(b => b.requests)
+
+// Asks for a story for the item, or links it to an existing one when `storyId` is given.
+export const requestStory = (task: Task, sourceLabel: string, developer: string, storyId?: number) =>
+  post<StoryRequest>('/story-requests', {
+    developer, itemId: task.id, itemRef: task.ref ?? '', itemUrl: task.url ?? null, title: task.title, source: sourceLabel, storyId,
+  })
+
+// The owner's answer: the story made for it, or a decline.
+export const answerStoryRequest = (id: string, developer: string, answer: { storyId: number } | { status: 'Declined' }) =>
+  put<StoryRequest>(`/story-requests/${id}`, { developer, ...answer })
+
+// "US-12345", "BUG-12345", "12345" or "#12345" → 12345; null for anything else.
+export function parseStoryId(text: string): number | null {
+  const n = Number(text.trim().replace(/^(?:[A-Z]+-|#)/i, ''))
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
 // Whether a Notion page is finished: Status or State is Done/Resolved/Closed,
 // or a Mark Done checkbox is ticked. Used when a planned item leaves the board.
 export async function fetchPageDone(id: string): Promise<boolean> {
@@ -163,6 +202,8 @@ export async function fetchPageDone(id: string): Promise<boolean> {
 // ─── ADO bridge (User Stories) ────────────────────────────────────────────────
 
 const ADO_BASE = '/ado'
+const ADO_WORKITEM_URL = 'https://dev.azure.com/BlueFCU/Blue%20Digital/_workitems/edit/'
+export const storyUrl = (id: number) => `${ADO_WORKITEM_URL}${id}`
 const ADO_ITERATION_TEMPLATE = 'Blue Digital\\Sprint {number} {year}'
 const ADO_QUEUE_SLUG = 'ado-stories'
 const ADO_DONE_STATE = 'Closed'
@@ -333,15 +374,29 @@ function adoPriority(p: number | null): Priority {
   return 'none'
 }
 
+// Each work item type's board type and ref prefix: US-12345, BUG-12346.
+const ADO_TYPES: Record<string, { type: TaskType; prefix: string }> = {
+  'User Story': { type: 'story', prefix: 'US' },
+  Bug: { type: 'bug', prefix: 'BUG' },
+  Hotfix: { type: 'bug', prefix: 'HOTFIX' },
+  Task: { type: 'task', prefix: 'TASK' },
+  Spike: { type: 'spike', prefix: 'SPIKE' },
+  Feature: { type: 'story', prefix: 'FEAT' },
+  Epic: { type: 'story', prefix: 'EPIC' },
+}
+const adoType = (workItemType: string) => ADO_TYPES[workItemType] ?? { type: 'task' as TaskType, prefix: 'WI' }
+export const adoRef = (adoId: number, workItemType: string) => `${adoType(workItemType).prefix}-${adoId}`
+
 function adoStoryToTask(w: AdoWorkItem): Task {
   const sprintNumber = w.iterationPath?.match(/Sprint (\d+)/)?.[1]
   const description = htmlToText(w.description)
   return {
     id: String(w.adoId),
-    ref: `US-${w.adoId}`,
+    ref: adoRef(w.adoId, w.workItemType),
     queue: ADO_QUEUE_SLUG,
     url: w.url ?? undefined,
-    type: w.workItemType === 'Bug' ? 'bug' : 'story',
+    type: adoType(w.workItemType).type,
+    typeName: w.workItemType,
     source: 'stories',
     title: w.title,
     description,
@@ -360,15 +415,37 @@ function adoStoryToTask(w: AdoWorkItem): Task {
 }
 
 const storyPoints = (items: AdoWorkItem[]) => items.reduce((sum, s) => sum + (s.storyPoints ?? 0), 0)
+const isStory = (w: AdoWorkItem) => w.workItemType === 'User Story'
+
+// An iteration path's sprint, as "Sprint 21 2026" or "2023 Sprint 24", with a
+// key that orders sprints by year then number; null for the backlog.
+export function iterationSprint(path: string | null): { label: string; key: number } | null {
+  const last = path?.split('\\').pop() ?? ''
+  const sprint = last.match(/Sprint (\d+)/i)?.[1]
+  if (!sprint) return null
+  const year = last.match(/\b(\d{4})\b/)?.[1]
+  return { label: last, key: Number(year ?? 0) * 100 + Number(sprint) }
+}
+
+// The developer's open User Stories in any sprint: the choices for linking an
+// item to a story. The latest sprint's come first and the backlog's last.
+export async function fetchDeveloperStories(developer: string): Promise<{ adoId: number; title: string; sprint: string }[]> {
+  const stories = await adoGet<AdoWorkItem[]>(`/workitems?${new URLSearchParams({ assignedTo: developer })}`)
+  return stories
+    .map(s => ({ s, sprint: iterationSprint(s.iterationPath) }))
+    .sort((a, b) => (b.sprint?.key ?? 0) - (a.sprint?.key ?? 0) || b.s.adoId - a.s.adoId)
+    .map(({ s, sprint }) => ({ adoId: s.adoId, title: s.title, sprint: sprint?.label ?? 'Backlog' }))
+}
 
 function adoStoriesQueue(): QueueAdapter {
   return {
     source: 'stories',
     slug: ADO_QUEUE_SLUG,
-    // Closed stories are fetched too, only to report sprint progress; the
-    // board shows the rest.
+    // Every work item type in the sprint (stories, bugs, tasks…). Closed ones
+    // are fetched too, only to report sprint progress, which counts User Stories;
+    // the board shows the rest.
     load: async (developer, sprint) => {
-      const params = new URLSearchParams({ assignedTo: developer, iteration: iterationFor(sprint), includeClosed: 'true' })
+      const params = new URLSearchParams({ assignedTo: developer, iteration: iterationFor(sprint), type: '', includeClosed: 'true' })
       const all = await adoGet<AdoWorkItem[]>(`/workitems?${params}`)
       const stories = all.filter(s => !ADO_CLOSED_STATES.has(s.state ?? ''))
       const done = all.filter(s => s.state === ADO_DONE_STATE)
@@ -382,10 +459,10 @@ function adoStoriesQueue(): QueueAdapter {
         claimedIds: [],
         lanes,
         progress: {
-          done: done.length,
-          total: done.length + stories.length,
-          donePoints: storyPoints(done),
-          totalPoints: storyPoints(done) + storyPoints(stories),
+          done: done.filter(isStory).length,
+          total: done.filter(isStory).length + stories.filter(isStory).length,
+          donePoints: storyPoints(done.filter(isStory)),
+          totalPoints: storyPoints(done.filter(isStory)) + storyPoints(stories.filter(isStory)),
         },
         doneIds: done.map(s => String(s.adoId)),
       }
@@ -456,14 +533,14 @@ export interface TeamBlocker {
   url?: string
 }
 
-// Every blocked User Story in the current sprint, for a lead's team view. Only
+// Every blocked work item in the current sprint, for a lead's team view. Only
 // ADO has a shared Blocked state: a Notion task blocked on the board stays in
 // that developer's browser.
 export async function fetchTeamBlockers(sprint: Sprint | null): Promise<TeamBlocker[]> {
-  const stories = await adoGet<AdoWorkItem[]>(`/workitems?${new URLSearchParams({ iteration: iterationFor(sprint) })}`)
-  return stories
+  const items = await adoGet<AdoWorkItem[]>(`/workitems?${new URLSearchParams({ iteration: iterationFor(sprint), type: '' })}`)
+  return items
     .filter(s => s.state === 'Blocked')
-    .map(s => ({ assignee: s.assignedToName ?? s.assignedTo ?? '', ref: `US-${s.adoId}`, title: s.title, url: s.url ?? undefined }))
+    .map(s => ({ assignee: s.assignedToName ?? s.assignedTo ?? '', ref: adoRef(s.adoId, s.workItemType), title: s.title, url: s.url ?? undefined }))
 }
 
 // ─── Mapping bridge items to cards ────────────────────────────────────────────

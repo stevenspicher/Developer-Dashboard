@@ -1,4 +1,4 @@
-import type { PullRequest, TeamBlocker } from '../../bridge'
+import type { PullRequest, StoryRequest, TeamBlocker } from '../../bridge'
 import type { Plan, PlanEntry } from '../../plan'
 import type { Task } from '../../types'
 
@@ -11,6 +11,7 @@ export type Selection =
   | { kind: 'task'; id: string }
   | { kind: 'review'; id: number }
   | { kind: 'team'; name: string }
+  | { kind: 'request'; id: string }
 
 export const sameSelection = (a: Selection | null, b: Selection | null) =>
   !!a && !!b && a.kind === b.kind && ('id' in a && 'id' in b ? a.id === b.id : 'name' in a && 'name' in b && a.name === b.name)
@@ -40,6 +41,7 @@ export type PaneContent =
   | { type: 'entry'; entry: PlanEntry }
   | { type: 'review'; pr: PullRequest }
   | { type: 'team'; member: TeamMember }
+  | { type: 'request'; request: StoryRequest }
   | { type: 'working'; task: Task }
   | { type: 'empty' }
 
@@ -52,9 +54,10 @@ export function resolvePane(selection: Selection | null, data: {
   tasksById: Map<string, Task>
   reviews: PullRequest[]
   team: TeamMember[]
+  requests?: StoryRequest[]
   workingTask: Task | null
 }): PaneContent {
-  const { plan, tasksById, reviews, team, workingTask } = data
+  const { plan, tasksById, reviews, team, requests = [], workingTask } = data
   if (selection?.kind === 'entry') {
     const entry = plan.entries.find(e => e.id === selection.id)
     if (entry) {
@@ -70,6 +73,9 @@ export function resolvePane(selection: Selection | null, data: {
   } else if (selection?.kind === 'team') {
     const member = team.find(m => m.developer === selection.name)
     if (member) return { type: 'team', member }
+  } else if (selection?.kind === 'request') {
+    const request = requests.find(r => r.id === selection.id)
+    if (request) return { type: 'request', request }
   }
   return workingTask ? { type: 'working', task: workingTask } : { type: 'empty' }
 }

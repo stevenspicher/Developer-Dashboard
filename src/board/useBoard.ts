@@ -3,12 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { QueueSource, Status, Task } from '../types'
 import {
   BRIDGE_REFRESH_MS, CALENDAR_LOOKAHEAD_DAYS, CONTEXT_REFRESH_MS, DEADLINE_TICKER_DAYS,
-  ADO_STORIES_ENABLED, DEVELOPER_STORAGE_KEY, STALE_STANDUP_DAYS, TEST_DEVELOPERS,
-  QUEUES, addDays, daysBetween, deadlineTickerText, fetchCurrentSprint, fetchDeadlines, fetchPageDone,
-  fetchReviews, fetchStandup, fetchTeamBlockers, formatSprintRange, loadDeveloper, loadLanes, localIsoDate, queueFor,
-  updateLanes,
+  ADO_STORIES_ENABLED, DEVELOPER_STORAGE_KEY, STALE_STANDUP_DAYS, STORY_REQUEST_OWNER, TEST_DEVELOPERS,
+  QUEUES, addDays, answerStoryRequest, daysBetween, deadlineTickerText, fetchCurrentSprint, fetchDeadlines, fetchPageDone,
+  fetchReviews, fetchStandup, fetchStoryRequests, fetchTeamBlockers, formatSprintRange, loadDeveloper, loadLanes, localIsoDate,
+  queueFor, requestStory, updateLanes,
 } from '../bridge'
-import type { BriefLine, Deadline, QueueProgress, Sprint, StandupBrief, TeamBlocker } from '../bridge'
+import type { BriefLine, Deadline, QueueProgress, Sprint, StandupBrief, StoryRequest, TeamBlocker } from '../bridge'
 import type { BootStep, BootStepState } from '../BootScreen'
 import type { CockpitValue } from '../ui/cockpit/context'
 import { clearTicks, loadTicks, saveTicks, toggleTick } from '../cockpitLogic'
@@ -21,7 +21,7 @@ import { rankUpNext, reasonsFor } from '../ranking'
 import type { RankContext } from '../ranking'
 import { comingUp, workingDaysAfter } from '../schedule'
 import { HIGHLIGHT_MS, SOURCE_TABS, UNDO_MS, errorText, sourceSystem } from './constants'
-import type { DayActions, DropZone, PendingDone, PlanView, ReaderTab, Reviews, Toast } from './types'
+import type { DayActions, DropZone, PendingDone, PlanView, ReaderTab, Reviews, StoryRequests, Toast } from './types'
 
 // All of the board's state, effects and actions: loading the queues, the plan,
 // lanes, done-with-undo, ticks, the standup and the derived views. It has no
@@ -48,6 +48,7 @@ export function useBoard() {
   const [hidden, setHidden] = useState<Set<string>>(new Set()) // marked done, still in the undo window
   const [teamBlockers, setTeamBlockers] = useState<TeamBlocker[]>([])
   const [reviews, setReviews] = useState<Reviews>(ADO_STORIES_ENABLED ? 'loading' : null) // every open PR, the same for all developers
+  const [storyRequests, setStoryRequests] = useState<StoryRequests>('loading') // every user story request, shared by all developers
   const [brief, setBrief] = useState<StandupBrief | { error: string } | null>(null)
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [reader, setReader] = useState<ReaderTab | null>(null)
@@ -87,6 +88,7 @@ export function useBoard() {
     setDoneIds(new Set())
     setTeamBlockers([])
     setReviews(ADO_STORIES_ENABLED ? 'loading' : null)
+    setStoryRequests('loading')
     setPlan(loadPlan(email, today))
     setTicks(loadTicks(email))
     setHighlight(null)
@@ -198,6 +200,18 @@ export function useBoard() {
     return () => { cancelled = true; clearInterval(t) }
   }, [])
 
+  // User story requests: shared by everyone, so a developer's board knows which
+  // items have one and the owner's board lists the open ones.
+  useEffect(() => {
+    let cancelled = false
+    const load = () => fetchStoryRequests()
+      .then(r => { if (!cancelled) setStoryRequests(r) })
+      .catch(e => { if (!cancelled) setStoryRequests({ error: errorText(e) }) })
+    load()
+    const t = setInterval(load, BRIDGE_REFRESH_MS)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [developer])
+
   // ── The day's plan ──
   useEffect(() => { setPlan(p => rollover(p, today)) }, [today])
   useEffect(() => { savePlan(developer, plan) }, [developer, plan])
@@ -207,13 +221,41 @@ export function useBoard() {
   useEffect(() => { if (briefData) setPlan(p => mergeBrief(p, briefData)) }, [briefData])
 
   const visibleTasks = useMemo(() => tasks.filter(t => !hidden.has(t.id)), [tasks, hidden])
+
+  // ── User story requests ──
+  const requestList = useMemo(() => (Array.isArray(storyRequests) ? storyRequests : []), [storyRequests])
+  const requestFor = useMemo(() => new Map(requestList.map(r => [r.itemId, r])), [requestList])
+  const isStoryOwner = developer === STORY_REQUEST_OWNER
+  const openRequests = requestList.filter(r => r.status === 'Requested')
+  const keepRequest = (saved: StoryRequest) =>
+    setStoryRequests(prev => [saved, ...(Array.isArray(prev) ? prev.filter(r => r.id !== saved.id) : [])])
+  const sourceLabelOf = (task: Task) => SOURCE_TABS.find(s => s.id === task.source)?.label ?? task.source
+  // Asks the owner for a story for the item, or links it to `storyId` when given.
+  const askForStory = (task: Task, storyId?: number) => {
+    const ref = task.ref ?? task.title
+    setActionError(null)
+    requestStory(task, sourceLabelOf(task), developer, storyId)
+      .then(saved => { keepRequest(saved); showToast(storyId ? `Linked ${ref} to US-${storyId}` : `Requested a user story for ${ref}`) })
+      .catch(e => setActionError(`Couldn't ${storyId ? 'link' : 'request'} a story for ${ref}: ${errorText(e)}`))
+  }
+  const answerRequest = (req: StoryRequest, answer: { storyId: number } | { status: 'Declined' }) => {
+    setActionError(null)
+    answerStoryRequest(req.id, developer, answer)
+      .then(saved => { keepRequest(saved); showToast('storyId' in answer ? `Linked ${req.itemRef || req.title} to US-${answer.storyId}` : `Declined the request for ${req.itemRef || req.title}`) })
+      .catch(e => setActionError(`Couldn't update the request for ${req.itemRef || req.title}: ${errorText(e)}`))
+  }
+
   const cockpit = useMemo<CockpitValue>(() => ({
     tasks: visibleTasks,
     ticks,
     developer,
     toggleTick: (task, criterion) => setTicks(t => toggleTick(t, task.id, criterion)),
     openTask: setModalTask,
-  }), [visibleTasks, ticks, developer])
+    storyRequest: task => requestFor.get(task.id),
+    requests: requestList,
+    requestsReady: Array.isArray(storyRequests),
+    askForStory, // reads only the developer, already a dependency
+  }), [visibleTasks, ticks, developer, requestFor, requestList, storyRequests])
   const tasksById = useMemo(() => new Map(visibleTasks.map(t => [t.id, t])), [visibleTasks])
 
   // Link entries to board items, and put anything pulled into Todo or Working
@@ -430,9 +472,11 @@ export function useBoard() {
 
   // ── Derived views ──
   const planned = useMemo(() => plannedIds(plan), [plan])
-  const queueTasks = visibleTasks.filter(t => t.status === 'queue' && t.source === queueTab && !planned.has(t.id))
-  const unplannedCount = (source?: QueueSource) =>
-    visibleTasks.filter(t => t.status === 'queue' && !planned.has(t.id) && (!source || t.source === source)).length
+  // A queue lists what's waiting plus what's already in the plan (marked ON PLAN),
+  // so an item stays findable where it came from.
+  const inQueue = (t: Task) => t.status === 'queue' || planned.has(t.id)
+  const queueTasks = visibleTasks.filter(t => t.source === queueTab && inQueue(t))
+  const queueCount = (source?: QueueSource) => visibleTasks.filter(t => inQueue(t) && (!source || t.source === source)).length
   const blockedTasks = visibleTasks.filter(t => t.status === 'blocked')
   const countOf = (source: QueueSource) => visibleTasks.filter(t => t.source === source).length
   const openEntries = plan.entries.filter(e => !e.done).length
@@ -560,10 +604,11 @@ export function useBoard() {
     // state
     tasks, visibleTasks, tasksById, plan, ticks, developer, currentDeveloper, today, sprint, brief, briefData, deadlines,
     reviews, teamBlockers, progress, bridgeLoading, bridgeErrors, actionError, toast, booting,
+    storyRequests, openRequests, isStoryOwner, answerRequest,
     workingTask, modalTask, linkFor, reader, queueTab, dragId, dropTarget,
     // derived
     planned, queueTasks, blockedTasks, openEntries, upNext, events, planView, linkCandidates,
-    unplannedCount, countOf, sprintHeader, sprintDay, sprintLength, sprintDaysLeft, tickerItems, calendarItems,
+    queueCount, countOf, sprintHeader, sprintDay, sprintLength, sprintDaysLeft, tickerItems, calendarItems,
     bootSteps, bootSummary,
     // actions
     actions, cockpit, doneHandler, startTask, addToPlan, moveTask, changeDeveloper, openMention,

@@ -17,7 +17,9 @@
  * borders, dots and decoration only, never for text.
  *
  * Each colour has one meaning: accent = interactive or selected, ok = done or
- * active, warn = needs attention, danger = critical, blocked or failed.
+ * active, warn = needs attention, danger = critical, blocked or failed. The
+ * --src-* colours tell the item sources apart (Stories, Tasks, Pulse,
+ * Solarwinds, ADS); they mark where an item comes from, never its status.
  * Components never hardcode a colour: use a token, or --tint / --shade for the
  * washes that lighten or darken a surface (bg-tint/5, bg-shade/40).
  */
@@ -46,6 +48,13 @@
   --danger: #ff3355;
   --danger-fg: #ff7a90; /* error text on dark panels */
   --phosphor: #7fe3ff;  /* boot terminal text */
+
+  /* Item sources. */
+  --src-stories: #b794ff;
+  --src-tasks: #6cb4ff;
+  --src-pulse: #ff7ac6;
+  --src-solarwinds: #c5e478;
+  --src-ads: #ffa07a;
 
   /* Washes: --tint lightens a surface, --shade darkens it. */
   --tint: #fff;
@@ -106,6 +115,12 @@
   --danger-fg: #b91c1c;
   --phosphor: #006b8a;
 
+  --src-stories: #6b3fd4;
+  --src-tasks: #1d5fb8;
+  --src-pulse: #b0306f;
+  --src-solarwinds: #4d6b0f;
+  --src-ads: #a8461e;
+
   --tint: #000;
   --shade: #1a2030;
 
@@ -152,6 +167,11 @@
   --color-danger: var(--danger);
   --color-danger-fg: var(--danger-fg);
   --color-phosphor: var(--phosphor);
+  --color-src-stories: var(--src-stories);
+  --color-src-tasks: var(--src-tasks);
+  --color-src-pulse: var(--src-pulse);
+  --color-src-solarwinds: var(--src-solarwinds);
+  --color-src-ads: var(--src-ads);
   --color-raised: var(--raised);
   --color-line-strong: var(--line-strong);
   --color-focus: var(--focus);

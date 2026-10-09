@@ -138,7 +138,7 @@ New manifest fields:
 **Queues (left panel):**
 | Tab | Source | Card | Actions |
 |---|---|---|---|
-| Stories | ado-bridge `/workitems`: User Stories assigned to the developer in the current sprint's iteration (`Blue Digital\Sprint N YYYY`). On by default; `VITE_ADO_STORIES=false` hides them. | `US-{id}`, state, points, description, acceptance criteria. ADO priority 1 = HIGH, 2 = MED, 3+ = LOW. | Adding to the plan or starting it sets Active, blocking sets Blocked, ✓ DONE sets Closed. Active stories start in the plan and Blocked ones in Blocked. |
+| Stories | ado-bridge `/workitems?type=`: every work item assigned to the developer in the current sprint's iteration (`Blue Digital\Sprint N YYYY`): User Stories, Bugs, Hotfixes and any other type. On by default; `VITE_ADO_STORIES=false` hides them. | `US-{id}`, `BUG-{id}`, `HOTFIX-{id}` (by type; the pane shows ADO's type name), state, points, description, acceptance criteria. ADO priority 1 = HIGH, 2 = MED, 3+ = LOW. | Adding to the plan or starting it sets Active, blocking sets Blocked, ✓ DONE sets Closed. Active stories start in the plan and Blocked ones in Blocked. |
 | Tasks | `sprint-developer-items` | `DEV-xxxxxx`, Notes, developer initials, `SPR-N`, standup age. HIGH if the standup is more than 6 days old. | ✓ DONE; lanes are dashboard-only |
 | Pulse | `pulse-queue` | `PULSE-xxxxxx`, Description, `SPR-N`. Priority MED for the current sprint, HIGH 1 sprint behind, CRIT 2 or more. | Adding to the plan, starting or dragging out claims it ("＋ CLAIM"); dragging back releases it; ✓ DONE |
 | Solarwinds | `solarwinds` | `SW-{Number}`, Priority, Description, State | Read-only; lanes are dashboard-only |
@@ -169,25 +169,26 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **Blocked:** shown when anything is blocked, or while dragging, as a drop target.
 - **Coming up:** the next 21 days from Deadlines and Milestones, the sprint end, and dates read from today's team items ("Code Jam at HQ on Oct. 8"). A team-item date that repeats a calendar entry is left out.
 - **Team notes:** today's team items, replacing the old ticker.
+- **Story requests:** requests live in Notion's User Story Requests database, read and written through notion-bridge `/story-requests` and shared by every board. The story owner (`STORY_REQUEST_OWNER` in `bridge.ts`, Steven) sees the open ones in Scan's Story requests tab and Flow's Story requests section, and answers each with the id of the story made for it (Link story) or Decline. A request carries a link to the item's page, since the owner needs its details to write the story.
 - **Leads:** someone who gets the Leadership Summary sees "Team today" first: each developer's update, plus their ADO stories in the Blocked state. Notion tasks blocked on the board live in each developer's browser, so they don't appear here.
 
 **Working on an item:**
 - Starting an item shows it in Flow's Working card, or in Scan's pane. Marking it done highlights the next plan entry.
 
 **Working card, Scan's pane and the detail modal:** all show the same cockpit pane (`src/ui/cockpit/CockpitPane.tsx`), the working one with a green "Working" marker.
-- **Header:** type, ref, source, state, "Open in ADO/Notion ↗" and "Ticket ↗", priority, points, sprint and avatar.
-- **Action bar, by the item's lane:** queue → ▶ Start and ＋ Plan (＋ Claim and plan for a Pulse item; "In today's plan" instead when it already is); today → Start and Block; working → Return to plan (draggable back to the queue) and Block; blocked → Unblock. ✓ Done is added wherever the source can be written to. In the modal the buttons follow the item as its lane changes.
+- **Header:** type (in the source's colour), ref, source, state, "Open in ADO ↗" for a story (Tasks, Pulse, Solarwinds and ADS items don't link to their Notion page) and "Ticket ↗", priority, points, sprint and avatar.
+- **Action bar, by the item's lane:** queue → ▶ Start and ＋ Plan (＋ Claim and plan for a Pulse item; "In today's plan" instead when it already is); today → Start and Block; working → Return to plan (draggable back to the queue) and Block; blocked → Unblock. ✓ Done is added wherever the source can be written to, at the far end. A task, Pulse item or ticket also shows its User Story: a link once it has one, "User Story requested" while a request waits, or **Request User Story** and **Link story** (pick one of the developer's open User Stories, grouped by sprint with the latest first and the backlog last, or enter any story's id). In the modal the buttons follow the item as its lane changes.
 - **Body:** title, description, checklist and notes, with dev links, project context and linked items beside them (below them when the pane is narrow, using a container query). Dev links and project context load for any item opened, not only the one being worked on, and the pane is keyed by the item so notes and ticks don't carry over to the next.
 - **Project context:** the linked Initiative, Issue and Analyst Issue as cards (Notion items), or the parent work item (ADO stories). A card opens a full view: every property with a value, full Description or Notes, full page content, and sub-page links.
 
 **Task cockpit** (`src/ui/cockpit/`, logic in `src/cockpitLogic.ts`): the parts below appear in the pane.
 - **Acceptance criteria checklist:** each criterion can be ticked, with a count (3/5) in the heading and an `AC 3/5` chip on queue cards. Ticks are stored in this browser per developer (`devDashboard.criteria.<email>`, keyed by criterion text) and nothing is written to ADO. They are cleared when the item is marked done in the dashboard, or when ADO reports it Closed.
 - **Dev links** (stories): pull requests (OPEN, DRAFT, MERGED or ABANDONED), branches, builds (PASSED, FAILED, PARTIAL or RUNNING), commits and hyperlinks, from ado-bridge `GET /workitems/{id}/links`. Against an ado-bridge without that endpoint the panel says it needs updating.
-- **Linked items:** ADO child and related work items (the parent stays under Project Context), plus loaded items that name this one by ref (`US-12345`, `#12345`, `BLUEADS-222`, `SW-4021`) or are named by it. Matching is on ref text only. Items on the board open in the detail view; others link out to ADO.
+- **Linked items:** ADO child and related work items (the parent stays under Project Context); for a story or bug, the tasks, Pulse items and tickets linked to it through a user story request (LINKED), and for such an item, its story (STORY); plus loaded items that name this one by ref (`US-12345`, `BUG-12346`, `#12345`, `BLUEADS-222`, `SW-4021`) or are named by it. An ADO ref and a `#number` match each other, whatever the work item's type. Items on the board open in the detail view; others link out to ADO or Notion.
 - **Notes:** one note per item, saved with SAVE NOTE (Ctrl or ⌘ + Enter). On a story it is a single ADO comment starting with `[Dev Dashboard note]`, edited in place on later saves. On a Notion item it is the "Dashboard notes" section of the item's page. Unsaved text is kept while you switch tasks.
 
 **Scan layout (`src/modes/scan/`; `/?ui=scan` shows it until a layout is picked in the header):** a list on the left and the selected thing in full on the right. Focus is the selection: j and k move through the list and the pane follows.
-- **Lists (tabs):** Plan, Queue (with a tab per source and its unplanned count), Next (Up next, with its reasons), Reviews, Blocked, and Team for a lead. Counts show on each tab. Switching lists clears the selection, so the pane shows what is being worked on, or nothing.
+- **Lists (tabs):** Plan, Queue (with a tab per source and its count; items already in the plan stay listed, marked ON PLAN), Next (Up next, with its reasons), Open pull requests, Blocked, Team for a lead, and Story requests for the story owner. Counts show on each tab. Switching lists clears the selection, so the pane shows what is being worked on, or nothing.
 - **The pane:** the cockpit pane for an item (a linked plan entry shows its item); an entry pane for a plan entry with no item (link it, confirm a suggestion, tick or remove it); a pull request pane (open in Azure DevOps); a team pane (a developer's update and blocked stories). The selection is a typed value (entry, task, review or team), so ids of different kinds can't be confused.
 - **Keys:** one table (`src/ui/keymap.ts`) drives the row handlers and the footer hints, and a test presses every key in it. Row keys are Enter, s, t, x or space, d, b, Delete and Alt+↑/↓; `p q n r` jump to the Plan, Queue, Next and Reviews lists and focus the first row. Enter on a row moves focus into the pane (an unlinked entry opens the link picker, a review opens the pull request); Esc in the pane returns to the row. The footer shows only keys some row in the current list responds to. Keys are ignored with Ctrl, Cmd or Alt, while an overlay is open, and while typing in a field.
 - **Drag and drop:** task and plan rows drag; the Plan, Blocked and Queue tabs accept drops (add to plan, block, return to queue) and highlight while a drag is over them; the pane accepts a drop to start it. A plan row dropped on Blocked blocks its item, on Queue removes it from the plan, and on the pane starts its item. Plan rows reorder by dropping one on another.
@@ -217,7 +218,7 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **Sprint Calendar:** Deadlines and Milestones through the sprint end plus 42 days, with bars showing where each falls in the sprint.
 - **Standup Draft:** the editable update described under Standup draft above.
 
-Stories closed/committed comes from the ADO query, which includes closed items for this; the board still hides Closed and Removed stories.
+Stories closed/committed comes from the ADO query, which includes closed items for this, and counts User Stories only; the board still hides Closed and Removed items.
 
 **Boot screen:**
 - Shows on first load and whenever the developer is switched.
@@ -265,7 +266,7 @@ Stories closed/committed comes from the ADO query, which includes closed items f
   - `faint` is for borders and decoration only, never text.
 - **Colour meanings:**
   - Each colour has one meaning: `accent` = interactive or selected, `ok` = done or active, `warn` = needs attention (HIGH, a stale standup, aging items), `danger` = critical, blocked or failed.
-  - Sources aren't colour-coded; type tags are neutral chips, and MED and LOW priorities are neutral.
+  - Each source has its own colour (`--src-stories`, `--src-tasks`, `--src-pulse`, `--src-solarwinds`, `--src-ads`): a row's left edge, its ref, and the type chip in the pane. They mark where an item comes from, never its status, and pass AA like the other text colours. MED and LOW priorities are neutral.
 - **Shared classes:** `.label`, `.ref`, `.chip`, `.btn-quiet`, `.link`, and `.panel`, in `@layer components`.
 - **Fonts:** monospace is for IDs, labels and metadata. Titles, body text and tab names use Inter.
 - **Inline styles:** inline `style` is only for data-driven values, such as calendar bar positions and the boot fade.

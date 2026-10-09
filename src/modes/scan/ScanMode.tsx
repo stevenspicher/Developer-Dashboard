@@ -20,7 +20,8 @@ import type { Filter } from '../../ui/keymap'
 import { LinkPicker } from '../../ui/LinkPicker'
 import { DetailModal } from '../../ui/DetailModal'
 import { BriefView, CalendarView, Reader, TickerView } from '../../ui/Reader'
-import { ENTRY_DRAG, PlanListRow, ReviewListRow, TaskListRow, TeamListRow } from '../../ui/rows'
+import { ENTRY_DRAG, PlanListRow, RequestListRow, ReviewListRow, TaskListRow, TeamListRow } from '../../ui/rows'
+import { StoryRequestCard } from '../../ui/StoryRequestCard'
 import type { Handlers } from '../../ui/rows'
 import { Toast } from '../../ui/Toast'
 import { useMediaQuery } from '../../ui/useMediaQuery'
@@ -40,10 +41,11 @@ export default function ScanMode() {
   const {
     visibleTasks, plan, tasksById, ticks, developer, currentDeveloper, today, sprint, brief, briefData, reviews, teamBlockers,
     bridgeLoading, bridgeErrors, actionError, toast, booting, workingTask, modalTask, linkFor, reader, queueTab, planned,
-    queueTasks, blockedTasks, openEntries, upNext, planView, linkCandidates, unplannedCount, countOf, sprintHeader,
+    queueTasks, blockedTasks, openEntries, upNext, planView, linkCandidates, queueCount, countOf, sprintHeader,
     sprintDay, sprintLength, tickerItems, calendarItems, bootSteps, bootSummary, actions, cockpit, doneHandler, moveTask,
     changeDeveloper, openMention, setQueueTab, closeDetail, startFromDetail, addFromDetail, dismissError,
     linkEntry, unlinkEntry, closePicker, setReader, closeReader, undoToast, dismissToast, finishBoot, startTask, addToPlan,
+    storyRequests, openRequests, isStoryOwner, answerRequest,
   } = board
 
   const wide = useMediaQuery('(min-width: 900px)')
@@ -106,10 +108,11 @@ export default function ScanMode() {
   const taskItems = (tasks: Task[], mode: 'queue' | 'next' | 'blocked', reasonsFor?: (t: Task) => { text: string; urgent?: boolean }[]): Item[] =>
     tasks.map(task => {
       const sel: Selection = { kind: 'task', id: task.id }
+      const onPlan = mode === 'queue' && planned.has(task.id)
       const handlers: Handlers = {
         open: focusPane,
         start: () => actions.start(task),
-        add: mode === 'blocked' ? () => actions.unblock(task) : () => actions.add(task),
+        add: mode === 'blocked' ? () => actions.unblock(task) : onPlan ? undefined : () => actions.add(task),
         block: mode === 'blocked' ? undefined : () => actions.block(task),
         done: actions.doneTarget(task) ? () => actions.done(task) : undefined,
       }
@@ -117,13 +120,13 @@ export default function ScanMode() {
         sel, handlers,
         render: selected => (
           <TaskListRow
-            key={task.id} task={task} id={rowId(sel)} selected={selected} reasons={reasonsFor?.(task)} handlers={handlers}
+            key={task.id} task={task} id={rowId(sel)} selected={selected} reasons={reasonsFor?.(task)} onPlan={onPlan} handlers={handlers}
             onSelect={select(sel)} onActivate={activate(sel)} onDragStart={e => actions.dragItem(e, task.id)}
             quick={
               <>
                 {mode === 'blocked'
                   ? <Button onClick={e => { e.stopPropagation(); actions.unblock(task) }} title="Move back to today's plan (t)">Unblock</Button>
-                  : <Button onClick={e => { e.stopPropagation(); actions.add(task) }} title={task.source === 'pulse' ? "Add to today's plan and claim it (t)" : "Add to today's plan (t)"}>{task.source === 'pulse' ? '＋ Claim' : '＋ Plan'}</Button>}
+                  : !onPlan && <Button onClick={e => { e.stopPropagation(); actions.add(task) }} title={task.source === 'pulse' ? "Add to today's plan and claim it (t)" : "Add to today's plan (t)"}>{task.source === 'pulse' ? '＋ Claim' : '＋ Plan'}</Button>}
                 <Button onClick={e => { e.stopPropagation(); actions.start(task) }} title="Start working on it (s)" aria-label="Start">▶</Button>
               </>
             }
@@ -138,6 +141,12 @@ export default function ScanMode() {
     return { sel, handlers, render: selected => <ReviewListRow key={pr.pullRequestId} pr={pr} id={rowId(sel)} selected={selected} today={today} handlers={handlers} onSelect={select(sel)} onActivate={activate(sel)} /> }
   })
 
+  const requestItems: Item[] = openRequests.map(request => {
+    const sel: Selection = { kind: 'request', id: request.id }
+    const handlers: Handlers = { open: focusPane }
+    return { sel, handlers, render: selected => <RequestListRow key={request.id} request={request} today={today} id={rowId(sel)} selected={selected} handlers={handlers} onSelect={select(sel)} onActivate={activate(sel)} /> }
+  })
+
   const teamItems: Item[] = team.members.map(m => {
     const sel: Selection = { kind: 'team', name: m.developer }
     const handlers: Handlers = { open: focusPane }
@@ -150,7 +159,8 @@ export default function ScanMode() {
         : filter === 'next' ? taskItems(upNext.map(s => s.task), 'next', task => planView.reasons(task))
           : filter === 'reviews' ? reviewItems
             : filter === 'blocked' ? taskItems(blockedTasks, 'blocked')
-              : teamItems
+              : filter === 'requests' ? requestItems
+                : teamItems
 
   // The hints cover every key some row in this list responds to.
   const hints = hintsFor(items.flatMap(i => Object.entries(i.handlers).filter(([, fn]) => fn).map(([action]) => action as never)))
@@ -189,7 +199,7 @@ export default function ScanMode() {
   }, [booting])
 
   // ── The pane.
-  const pane = resolvePane(selection, { plan, tasksById, reviews: reviewList, team: team.members, workingTask })
+  const pane = resolvePane(selection, { plan, tasksById, reviews: reviewList, team: team.members, requests: openRequests, workingTask })
   const sourceLabel = (task: Task) => SOURCE_TABS.find(s => s.id === task.source)?.label
   const cockpitPane = (task: Task) => (
     <CockpitPane
@@ -206,6 +216,7 @@ export default function ScanMode() {
 
   const emptyHint: Record<Filter, string> = {
     plan: 'Select an entry', queue: 'Select an item', next: 'Select an item', reviews: 'Select a pull request', blocked: 'Select an item', team: 'Select a developer',
+    requests: 'Select a request',
   }
   let paneNode: React.ReactNode
   switch (pane.type) {
@@ -221,17 +232,21 @@ export default function ScanMode() {
       break
     case 'review': paneNode = <ReviewPane key={pane.pr.pullRequestId} pr={pane.pr} today={today} />; break
     case 'team': paneNode = <TeamPane key={pane.member.developer} member={pane.member} />; break
+    case 'request':
+      paneNode = <div className="min-h-0 flex-1 overflow-y-auto"><StoryRequestCard key={pane.request.id} request={pane.request} onAnswer={answer => answerRequest(pane.request, answer)} /></div>
+      break
     default: paneNode = <EmptyPane title={emptyHint[filter]} hint="Press j or k to move through the list." />
   }
 
   // ── Lists' own states.
   const tabs = [
     { id: 'plan' as Filter, label: 'Plan', count: openEntries },
-    { id: 'queue' as Filter, label: 'Queue', count: unplannedCount() },
+    { id: 'queue' as Filter, label: 'Queue', count: queueCount() },
     { id: 'next' as Filter, label: 'Next', count: upNext.length },
     { id: 'reviews' as Filter, label: 'Open pull requests', count: reviewList.length },
     { id: 'blocked' as Filter, label: 'Blocked', count: blockedTasks.length },
     ...(lead ? [{ id: 'team' as Filter, label: 'Team', count: team.members.length }] : []),
+    ...(isStoryOwner ? [{ id: 'requests' as Filter, label: 'Story requests', count: openRequests.length }] : []),
   ]
   // A plan row dropped on a tab or the pane acts on its entry, or the item it is
   // linked to: Blocked blocks it, Queue takes it out of the plan, the pane starts it.
@@ -258,7 +273,7 @@ export default function ScanMode() {
     if (filter === 'plan') return <EmptyState title="Nothing planned yet" hint={briefData?.mode === 'brief' || lead ? 'Add items from Next, or from the queue.' : BRIEFLESS_PLAN} />
     if (filter === 'queue') {
       if (bridgeLoading && QUEUES.some(q => q.source === queueTab)) return <EmptyState title="Loading…" />
-      return <EmptyState title={countOf(queueTab) === 0 ? 'No items in this queue' : 'Everything here is in your plan'} />
+      return <EmptyState title="No items in this queue" />
     }
     if (filter === 'next') return <EmptyState title="Nothing waiting outside your plan" />
     if (filter === 'reviews') {
@@ -267,6 +282,11 @@ export default function ScanMode() {
       return <EmptyState title={reviews === null ? 'Open pull requests need ado-bridge' : 'No open pull requests'} />
     }
     if (filter === 'blocked') return <EmptyState title="Nothing is blocked" hint="Press b on an item, or drop it on this tab." />
+    if (filter === 'requests') {
+      if (storyRequests === 'loading') return <EmptyState title="Loading…" />
+      if (!Array.isArray(storyRequests)) return <div className="p-3"><ErrorNote>Story requests unavailable · {storyRequests.error}</ErrorNote></div>
+      return <EmptyState title="No open story requests" />
+    }
     return <EmptyState title="No developer updates in this summary" />
   })()
 
@@ -301,7 +321,7 @@ export default function ScanMode() {
                 <Tabs
                   label="Sources"
                   dense
-                  tabs={SOURCE_TABS.map(t => ({ id: t.id, label: t.label, count: unplannedCount(t.id) }))}
+                  tabs={SOURCE_TABS.map(t => ({ id: t.id, label: t.label, count: queueCount(t.id) }))}
                   value={queueTab}
                   onChange={setQueueTab}
                   className="shrink-0 overflow-x-auto px-1"

@@ -1,12 +1,12 @@
 import { useRef } from 'react'
 import type { ButtonHTMLAttributes, KeyboardEvent, ReactNode } from 'react'
 
-import type { Priority, TaskType } from '../types'
-import { PRIORITY, TYPE_LABELS, buildStatus, prStatus } from './labels'
+import type { Priority, QueueSource, TaskType } from '../types'
+import { PRIORITY, SOURCE_COLOR, TYPE_LABELS, buildStatus, prStatus } from './labels'
 import type { Status, Tone } from './labels'
 
-// Small shared components, built from the design tokens. Colour carries status
-// only (see labels.ts), text is Inter except for refs, counts, chips and
+// Small shared components, built from the design tokens. Colour carries status,
+// or an item's source (see labels.ts), text is Inter except for refs, counts, chips and
 // section labels, and the compact density tightens padding through `compact:`.
 
 const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ')
@@ -33,10 +33,20 @@ export function Chip({ tone = 'neutral', title, children }: {
   return <span title={title} className={cx('chip', CHIP_TONE[tone])}>{children}</span>
 }
 
-export const TypeChip = ({ type }: { type: TaskType }) => <Chip>{TYPE_LABELS[type]}</Chip>
+// The item's type, in its source's colour when the source is given. `name` is
+// the source's own type name ("Feature"), shown instead when given.
+export const TypeChip = ({ type, source, name }: { type: TaskType; source?: QueueSource; name?: string }) =>
+  <span className={cx('chip', source && SOURCE_COLOR[source].chip)}>{name ? name.toUpperCase() : TYPE_LABELS[type]}</span>
 
-// An item reference: US-12236, DEV-CBB875.
-export const Ref = ({ children }: { children: ReactNode }) => <span className="ref">{children}</span>
+// An item reference: US-12236, DEV-CBB875; in its source's colour when given.
+export const Ref = ({ source, children }: { source?: QueueSource; children: ReactNode }) =>
+  <span className={cx('ref', source && SOURCE_COLOR[source].text)}>{children}</span>
+
+// Marks a queue item that is already in today's plan. Solid, so it stands out
+// in a list of otherwise outlined chips.
+export const OnPlanBadge = () => (
+  <span title="In today's plan" className="inline-flex items-center rounded-xs border border-accent bg-accent px-1.5 font-mono text-badge font-bold tracking-wider text-bg">ON PLAN</span>
+)
 
 // A priority dot and word. Nothing for an item without a priority.
 export function PriorityBadge({ priority }: { priority: Priority }) {
