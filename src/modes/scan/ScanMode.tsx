@@ -264,7 +264,7 @@ export default function ScanMode() {
     if (filter === 'reviews') {
       if (reviews === 'loading') return <EmptyState title="Loading…" />
       if (reviews && !Array.isArray(reviews)) return <div className="p-3"><ErrorNote>{reviews.error === 'Not Found' ? 'Reviews need an updated ado-bridge' : `Reviews unavailable · ${reviews.error}`}</ErrorNote></div>
-      return <EmptyState title={reviews === null ? 'Reviews need ado-bridge' : 'No reviews waiting on you'} />
+      return <EmptyState title={reviews === null ? 'Reviews need ado-bridge' : 'No open pull requests'} />
     }
     if (filter === 'blocked') return <EmptyState title="Nothing is blocked" hint="Press b on an item, or drop it on this tab." />
     return <EmptyState title="No developer updates in this summary" />
@@ -368,7 +368,7 @@ export default function ScanMode() {
               brief: <BriefView brief={brief} tasks={visibleTasks} onOpen={openMention} today={today} />,
               ticker: <TickerView items={tickerItems} />,
               calendar: <CalendarView items={calendarItems} sprint={sprint} today={today} header={<span className="font-mono text-meta text-muted">{sprintHeader}</span>} />,
-              draft: <StandupDraft draft={buildStandupDraft({ today, plan, tasksById, blocked: blockedTasks, reviews: reviewList, ticks, longDate: formatLongDate(today) })} />,
+              draft: <StandupDraft draft={buildStandupDraft({ today, plan, tasksById, blocked: blockedTasks, ticks, longDate: formatLongDate(today) })} />,
             }}
           />
         )}

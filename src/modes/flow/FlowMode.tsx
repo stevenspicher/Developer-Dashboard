@@ -350,7 +350,7 @@ export default function FlowMode() {
             </Section>
 
             {reviews !== null && (
-              <Section id="flow-reviews" label="Reviews waiting" count={reviewList.length || undefined}>
+              <Section id="flow-reviews" label="Open pull requests" count={reviewList.length || undefined}>
                 <div data-rows="reviews">
                   {reviewRows}
                 </div>
@@ -358,7 +358,7 @@ export default function FlowMode() {
                 {reviews && !Array.isArray(reviews) && reviews !== 'loading' && (
                   <ErrorNote>{reviews.error === 'Not Found' ? 'Reviews need an updated ado-bridge' : `Reviews unavailable · ${reviews.error}`}</ErrorNote>
                 )}
-                {Array.isArray(reviews) && reviews.length === 0 && <div className="py-2 text-note text-muted">No reviews waiting on you.</div>}
+                {Array.isArray(reviews) && reviews.length === 0 && <div className="py-2 text-note text-muted">No open pull requests.</div>}
                 {reviewList.some(pr => reviewAge(pr, today) >= STALE_REVIEW_DAYS) && <div className="sr-only">Some reviews have waited {STALE_REVIEW_DAYS} days or more.</div>}
               </Section>
             )}
@@ -428,7 +428,7 @@ export default function FlowMode() {
               brief: <BriefView brief={brief} tasks={visibleTasks} onOpen={openMention} today={today} />,
               ticker: <TickerView items={tickerItems} />,
               calendar: <CalendarView items={calendarItems} sprint={sprint} today={today} header={<span className="font-mono text-meta text-muted">{sprintHeader}</span>} />,
-              draft: <StandupDraft draft={buildStandupDraft({ today, plan, tasksById, blocked: blockedTasks, reviews: reviewList, ticks, longDate: formatLongDate(today) })} />,
+              draft: <StandupDraft draft={buildStandupDraft({ today, plan, tasksById, blocked: blockedTasks, ticks, longDate: formatLongDate(today) })} />,
             }}
           />
         )}

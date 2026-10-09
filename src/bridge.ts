@@ -434,7 +434,7 @@ function adoStoriesQueue(): QueueAdapter {
   }
 }
 
-// An active pull request the developer is a reviewer on, from ado-bridge.
+// An active pull request in the repos org, from ado-bridge.
 export interface PullRequest {
   pullRequestId: number
   title: string
@@ -445,10 +445,9 @@ export interface PullRequest {
   url: string
 }
 
-// Active pull requests waiting on this developer's review (no vote yet),
-// oldest first. Drafts and ones they've declined are left out by the bridge.
-export const fetchReviews = (developer: string) =>
-  adoGet<PullRequest[]>(`/pullrequests?reviewer=${encodeURIComponent(developer)}`)
+// Every active pull request, shown to all developers, oldest first. Drafts
+// are left out by the bridge.
+export const fetchReviews = () => adoGet<PullRequest[]>('/pullrequests')
 
 export interface TeamBlocker {
   assignee: string

@@ -77,7 +77,7 @@ export function EntryPane({ entry, suggestion, today, onLink, onConfirm, onRejec
   )
 }
 
-// ─── A pull request waiting on you ────────────────────────────────────────────
+// ─── An open pull request ─────────────────────────────────────────────────────
 
 export function ReviewPane({ pr, today }: { pr: PullRequest; today: string }) {
   const days = reviewAge(pr, today)

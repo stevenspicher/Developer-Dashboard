@@ -47,7 +47,7 @@ export function useBoard() {
   const [toast, setToast] = useState<Toast | null>(null)
   const [hidden, setHidden] = useState<Set<string>>(new Set()) // marked done, still in the undo window
   const [teamBlockers, setTeamBlockers] = useState<TeamBlocker[]>([])
-  const [reviews, setReviews] = useState<Reviews>(ADO_STORIES_ENABLED ? 'loading' : null) // PRs waiting on the developer
+  const [reviews, setReviews] = useState<Reviews>(ADO_STORIES_ENABLED ? 'loading' : null) // every open PR, the same for all developers
   const [brief, setBrief] = useState<StandupBrief | { error: string } | null>(null)
   const [deadlines, setDeadlines] = useState<Deadline[]>([])
   const [reader, setReader] = useState<ReaderTab | null>(null)
@@ -186,17 +186,17 @@ export function useBoard() {
     return () => { cancelled = true }
   }, [lead, sprint?.number, developer])
 
-  // Pull requests waiting on this developer's review.
+  // Every open pull request, the same list for all developers.
   useEffect(() => {
     if (!ADO_STORIES_ENABLED) return
     let cancelled = false
-    const load = () => fetchReviews(developer)
+    const load = () => fetchReviews()
       .then(r => { if (!cancelled) setReviews(r) })
       .catch(e => { if (!cancelled) setReviews({ error: errorText(e) }) })
     load()
     const t = setInterval(load, CONTEXT_REFRESH_MS)
     return () => { cancelled = true; clearInterval(t) }
-  }, [developer])
+  }, [])
 
   // ── The day's plan ──
   useEffect(() => { setPlan(p => rollover(p, today)) }, [today])

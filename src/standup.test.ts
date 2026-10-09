@@ -1,21 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import type { PullRequest } from './bridge'
 import { buildStandupDraft } from './standup'
 import type { StandupInput } from './standup'
 import { makeEntry, makePlan, makeTask } from './test/factories'
-
-const review = (overrides: Partial<PullRequest> = {}): PullRequest => ({
-  pullRequestId: 482, title: 'Holiday loans merge fix', repo: 'loans-api', author: 'Luiz', createdDate: '2026-10-03T10:00:00Z',
-  isRequired: false, url: 'https://ado.example/pr/482', ...overrides,
-})
 
 const input = (overrides: Partial<StandupInput> = {}): StandupInput => ({
   today: '2026-10-06',
   plan: makePlan(),
   tasksById: new Map(),
   blocked: [],
-  reviews: [],
   ticks: {},
   longDate: 'Tuesday, Oct 6',
   ...overrides,
@@ -64,21 +57,6 @@ describe('buildStandupDraft', () => {
     const base = { plan, tasksById: new Map([['a', task]]) }
     expect(buildStandupDraft(input({ ...base, ticks: {} }))).toContain('• Close out the diary\n')
     expect(buildStandupDraft(input({ ...base, ticks: { a: ['One', 'Two'] } }))).toContain('• Close out the diary — 2/3 criteria done')
-  })
-
-  it('adds each review after the plan, with its repo and how long it has waited', () => {
-    const plan = makePlan([makeEntry({ text: 'Plan item' })])
-    const draft = buildStandupDraft(input({
-      plan,
-      reviews: [review(), review({ pullRequestId: 490, title: 'Fresh PR', repo: null, createdDate: '2026-10-06T08:00:00Z' })],
-    }))
-    expect(draft).toContain('• Plan item\n• Review PR 482: Holiday loans merge fix (loans-api, 3 days old)\n• Review PR 490: Fresh PR (today)\n')
-  })
-
-  it('lists reviews under Today even when nothing is planned, and plain-texts link markup', () => {
-    const draft = buildStandupDraft(input({ reviews: [review({ title: 'Fix [the bug](https://x.test/1)' })] }))
-    expect(draft).toContain('Today\n• Review PR 482: Fix the bug (loans-api, 3 days old)')
-    expect(draft).not.toContain('Nothing planned yet')
   })
 
   it('leaves out empty sections and ends with a single newline', () => {
