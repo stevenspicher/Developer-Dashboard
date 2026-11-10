@@ -1,5 +1,9 @@
 # Connecting an Application to notion-bridge
 
+> **Where it runs now:** these endpoints are served by ado-bridge under the
+> `/notion` prefix, with the same JSON and status codes. Wherever this document
+> says `http://localhost:3100`, use `http://localhost:8000/notion`.
+
 ## Purpose
 
 This document instructs an LLM (or developer) on how to connect an existing application to the **notion-bridge** service. notion-bridge is a caching, authorizing proxy over Notion. It exposes a REST API that lets a developer dashboard pull task queues, resolve related context, claim/release/complete items, and read the current sprint and daily standup brief — all without the application talking to Notion directly.
@@ -475,7 +479,7 @@ Add the bridge URL to your application's configuration. Do not hardcode it.
 
 ```
 # Example environment variable
-NOTION_BRIDGE_URL=http://localhost:3100
+NOTION_BRIDGE_URL=http://localhost:8000/notion
 ```
 
 Create a single HTTP client or service module that all bridge calls go through. Centralize:

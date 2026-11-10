@@ -9,8 +9,9 @@ services:
     ports:
       - "${DASHBOARD_PORT:-8080}:80"
     environment:
-      # The bridges run as their own containers/processes, published on the host.
-      NOTION_BRIDGE_URL: ${NOTION_BRIDGE_URL:-http://host.docker.internal:3100}
+      # One bridge service (ado-bridge) published on the host serves both: its
+      # Notion routes live under /notion.
+      NOTION_BRIDGE_URL: ${NOTION_BRIDGE_URL:-http://host.docker.internal:8000/notion}
       ADO_BRIDGE_URL: ${ADO_BRIDGE_URL:-http://host.docker.internal:8000}
     extra_hosts:
       # Makes host.docker.internal work on Linux too (built in on Docker Desktop).

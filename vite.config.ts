@@ -36,7 +36,9 @@ react(),
       strictPort: true,
       proxy: {
         '/bridge': {
-          target: process.env.NOTION_BRIDGE_URL || 'http://localhost:3100',
+          // Notion routes are served by ado-bridge under /notion; the proxy
+          // prepends the target's path, so /bridge/queues → /notion/queues.
+          target: process.env.NOTION_BRIDGE_URL || 'http://localhost:8000/notion',
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/bridge/, ''),
         },

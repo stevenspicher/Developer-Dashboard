@@ -1051,7 +1051,7 @@ Every question in §9.1 is now decided. Q4, Q5 and Q6 above change the earlier r
 
 ### 10.1 Data sources, bridges and endpoints the UI uses
 
-All calls are same-origin. Vite proxies `/bridge` to notion-bridge (`NOTION_BRIDGE_URL`, default `http://localhost:3100`) and `/ado` to ado-bridge (`ADO_BRIDGE_URL`, default `http://localhost:8000`) (`vite.config.ts:37-48`); in Docker, nginx does the same (`nginx.conf.template`). The developer is passed as `?developer=<email>` or in the JSON body.
+All calls are same-origin. Vite proxies `/bridge` to ado-bridge's `/notion` routes (`NOTION_BRIDGE_URL`, default `http://localhost:8000/notion`) and `/ado` to ado-bridge (`ADO_BRIDGE_URL`, default `http://localhost:8000`) (`vite.config.ts:37-48`); in Docker, nginx does the same (`nginx.conf.template`). The developer is passed as `?developer=<email>` or in the JSON body.
 
 **notion-bridge** (`/bridge`)
 

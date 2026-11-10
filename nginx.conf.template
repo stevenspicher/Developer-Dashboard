@@ -1,5 +1,5 @@
 # Serves the built dashboard and forwards API calls the way the Vite dev server
-# proxy does (vite.config.ts): /bridge/* → notion-bridge, /ado/* → ado-bridge,
+# proxy does (vite.config.ts): /bridge/* → ado-bridge's /notion routes, /ado/* → ado-bridge,
 # with the prefix stripped. ${VARS} are filled in by the nginx image at startup.
 server {
     listen 80;

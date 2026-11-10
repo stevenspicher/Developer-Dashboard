@@ -1,17 +1,19 @@
 # Developer Dashboard
 
 A dashboard for monitoring and managing development projects. It reads live
-queues from [notion-bridge](https://github.com/stevenspicher/notion-bridge)
-(and, optionally, User Stories from ado-bridge).
+queues from the `/notion` routes of ado-bridge (the port of
+[notion-bridge](https://github.com/stevenspicher/notion-bridge)) and,
+optionally, User Stories from the same service.
 
 ## Getting Started
 
 ```bash
 npm install
-npm run dev        # http://localhost:8443, proxies /bridge → localhost:3100, /ado → localhost:8000
+npm run dev        # http://localhost:8443, proxies /bridge → localhost:8000/notion, /ado → localhost:8000
 ```
 
-Point the proxy elsewhere with `NOTION_BRIDGE_URL` / `ADO_BRIDGE_URL`.
+Point the proxy elsewhere with `NOTION_BRIDGE_URL` / `ADO_BRIDGE_URL`; to use the
+old standalone notion-bridge, set `NOTION_BRIDGE_URL=http://localhost:3100`.
 ADO User Stories are on by default and need ado-bridge connected to Azure DevOps (`ADO_PAT` in its `.env`). Start with `VITE_ADO_STORIES=false` to hide them.
 
 ## Layouts
@@ -43,7 +45,8 @@ docker compose up -d --build   # http://localhost:8080
 ```
 
 The image builds the app and serves it with nginx, which forwards `/bridge` and
-`/ado` to the bridges running on the host (`host.docker.internal:3100` / `:8000`).
+`/ado` to ado-bridge running on the host (`host.docker.internal:8000/notion` and
+`host.docker.internal:8000`).
 
 | Setting | When it applies |
 |---|---|

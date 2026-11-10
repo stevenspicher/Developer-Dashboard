@@ -9,14 +9,14 @@ Status: implemented, tested, and pushed on 2026-09-29; updated 2026-10-02.
 ## 1. Overview
 For the full bridge API contract (request and response shapes, errors, integration checklist), see [`Notion Bridge INTEGRATION.md`](../Notion%20Bridge%20INTEGRATION.md).
 
-The dashboard is a React/Vite app on port 8443. It reads and writes Notion only through **notion-bridge**, an Express app on port 3100, and ADO User Stories only through **ado-bridge**, a FastAPI app on port 8000. The Vite dev server forwards `/bridge/*` and `/ado/*` to them (`vite.config.ts`; override with the `NOTION_BRIDGE_URL` and `ADO_BRIDGE_URL` env vars), so the browser never makes a cross-origin call.
+The dashboard is a React/Vite app on port 8443. It reads and writes Notion only through the `/notion` routes of **ado-bridge**, a FastAPI app on port 8000 (the port of notion-bridge, with the same JSON and status codes), and ADO User Stories only through the same service. The Vite dev server forwards `/bridge/*` and `/ado/*` to them (`vite.config.ts`; override with the `NOTION_BRIDGE_URL` and `ADO_BRIDGE_URL` env vars), so the browser never makes a cross-origin call.
 
 ```
-Browser (Dashboard :8443) ──/bridge/*──▶ Vite proxy ──▶ notion-bridge :3100 ──▶ Notion API
-                          ──/ado/*─────▶ Vite proxy ──▶ ado-bridge :8000 ────▶ Azure DevOps (or its mock seed)
+Browser (Dashboard :8443) ──/bridge/*──▶ Vite proxy ──▶ ado-bridge :8000/notion ──▶ Notion API
+                          ──/ado/*─────▶ Vite proxy ──▶ ado-bridge :8000 ─────────▶ Azure DevOps (or its mock seed)
 ```
 
-The bridge drives almost everything from `config/manifest.json`. Adding or retuning a queue is a manifest edit plus a bridge restart; the manifest is read once and cached.
+The bridge drives almost everything from its queue manifest (`config/notion-manifest.json` in ado-bridge). Adding or retuning a queue is a manifest edit plus a bridge restart; the manifest is read once and cached.
 
 ## 2. Notion setup (current state)
 **Databases shared with the bridge integration:**
