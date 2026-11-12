@@ -144,7 +144,7 @@ New manifest fields:
 | Solarwinds | `solarwinds` | `SW-{Number}`, Priority, Description, State | Read-only; lanes are dashboard-only |
 | ADS | `ads-tickets` | Issue Key (`BLUEADS-222`), Priority, Description, Status, Jira link. Only the assignee sees it. Blocker and Critical = CRIT, Major = HIGH, Minor = MED, Trivial = LOW. | Read-only; lanes are dashboard-only |
 
-Zendesk has no queue yet, so its tab is hidden. The queues list only items that aren't in today's plan, and the tab counts do the same.
+Zendesk has no queue yet, so its tab is hidden. Items already in today's plan stay in their queue, marked ON PLAN, and the tab counts include them.
 
 **Board behavior:**
 - **Lanes:** Todo (now "in today's plan"), Working and Blocked are saved in localStorage per developer (`devDashboard.lanes.<email>`), so they survive reloads.
@@ -201,7 +201,7 @@ Zendesk has no queue yet, so its tab is hidden. The queues list only items that 
 - **Sections:** the day header (date, sprint line, brief chip, standup draft, story progress, and a day strip `7 to do · 1 working · 1 blocked · 0 done today` whose parts scroll to their sections); Team today (leads); Today's plan; Working; Blocked (shown when anything is blocked, or while dragging); Up next; Open pull requests; Coming up; Team notes.
 - **Plan rows** tick, start, block, remove and reorder (drag, or Alt+↑/↓). Enter or a click expands a row in place into a compact cockpit (dev links and context below the notes) with "Open full" (the dialog) and Collapse; an unlinked entry expands to its suggestion and link controls. Esc collapses it and returns focus to the row. Enter on an unlinked row opens the link picker.
 - **Working** shows the full cockpit. Up next, Blocked and the drawer open an item in the dialog.
-- **Queues drawer** (right, 360px; full width under 900px): `q` or "＋ Add item" opens it and focuses its first card, Esc or a click outside closes it and returns focus. It has a tab per source with unplanned counts. It is a drop zone for returning items to the queue; its click-catcher steps aside while a card is dragged so the card can reach the plan.
+- **Queues drawer** (right, 360px; full width under 900px): `q` or "＋ Add item" opens it and focuses its first card, Esc or a click outside closes it and returns focus. It has a tab per source with its count. It is a drop zone for returning items to the queue; its click-catcher steps aside while a card is dragged so the card can reach the plan.
 - **Drag and drop:** task cards drop on the plan (add), Working (start) and Blocked (block). A plan row dropped on Working starts its item, on Blocked blocks it, and on the drawer removes it from the plan.
 - **Keys:** the row keys of Scan, plus `p n r` to focus the first row of Plan, Up next and Reviews and `q` for the drawer; all from `src/ui/keymap.ts`, with a footer built from the keys some row responds to.
 
